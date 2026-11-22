@@ -1,0 +1,18 @@
+# The public domain is secured automatically by Caddy once its A record points
+# at this server. Keep the IP endpoint redirected so it cannot become a second
+# public origin for authenticated sessions.
+http://51.170.140.65 {
+	redir https://42teamfinder.dev{uri} permanent
+}
+
+51.170.140.65.nip.io {
+	redir https://42teamfinder.dev{uri} permanent
+}
+
+42teamfinder.dev, www.42teamfinder.dev {
+	@www host www.42teamfinder.dev
+	redir @www https://42teamfinder.dev{uri} permanent
+
+	encode zstd gzip
+	reverse_proxy frontend:3000
+}

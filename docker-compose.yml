@@ -1,0 +1,52 @@
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      FT_CLIENT_ID: ${FT_CLIENT_ID:-}
+      FT_CLIENT_SECRET: ${FT_CLIENT_SECRET:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-24}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////app/data/team_finder.db}
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-3600}
+      AVATAR_CACHE_DIRECTORY: ${AVATAR_CACHE_DIRECTORY:-/app/data/avatars}
+      AVATAR_CACHE_TTL_SECONDS: ${AVATAR_CACHE_TTL_SECONDS:-86400}
+      API_CONCURRENCY: ${API_CONCURRENCY:-4}
+      API_MIN_INTERVAL_SECONDS: ${API_MIN_INTERVAL_SECONDS:-0.6}
+      DEMO_MODE: ${DEMO_MODE:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+    volumes:
+      - team_finder_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    expose: ["8000"]
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+  caddy:
+    image: caddy:2.8-alpine
+    profiles: ["public"]
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  team_finder_data:
+  caddy_data:
+  caddy_config:
