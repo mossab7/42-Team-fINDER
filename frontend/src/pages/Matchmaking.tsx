@@ -79,9 +79,21 @@ export function Discover() {
   const candidates = useQuery({ queryKey: ['candidates', project], queryFn: () => api.candidates(project!), enabled: !!project })
   useEffect(() => { if (!project && projects.data?.items[0]) setProject(projects.data.items[0].id) }, [projects.data, project])
   useEffect(() => { setDismissed([]); setMatchedPerson(undefined) }, [project])
-  const swipe = useMutation({ mutationFn: ({ id, direction }: { id: number; direction: 'left' | 'right'; person: StudentProfile }) => api.swipe(id, project!, direction), onSuccess: (result, variables) => { queryClient.invalidateQueries({ queryKey: ['candidates', project] }); if (result.matched) { queryClient.invalidateQueries({ queryKey: ['matches'] }); if (variables.direction === 'right') setMatchedPerson(variables.person) } }, onError: (_error, variables) => setDismissed(current => current.filter(id => id !== variables.id)) })
+  const swipe = useMutation({ mutationFn: ({ id, direction }: { id: number; direction: 'left' | 'right' }) => api.swipe(id, project!, direction) })
   const person = candidates.data?.items.find(candidate => !dismissed.includes(candidate.user_id))
-  const act = (direction: 'left' | 'right') => { if (!person) return; setDismissed(current => [...current, person.user_id]); swipe.mutate({ id: person.user_id, direction, person }) }
+  const act = async (direction: 'left' | 'right') => {
+    if (!person) return
+    const swipedPerson = person
+    setDismissed(current => [...current, swipedPerson.user_id])
+    try {
+      const result = await swipe.mutateAsync({ id: swipedPerson.user_id, direction })
+      if (result.matched && direction === 'right') setMatchedPerson(swipedPerson)
+      void queryClient.invalidateQueries({ queryKey: ['candidates', project] })
+      if (result.matched) void queryClient.invalidateQueries({ queryKey: ['matches'] })
+    } catch {
+      setDismissed(current => current.filter(id => id !== swipedPerson.user_id))
+    }
+  }
   return <section className="relative mx-auto max-w-7xl px-5 py-8 sm:px-8 lg:py-12">
     {matchedPerson && <MatchCelebration person={matchedPerson} onClose={() => setMatchedPerson(undefined)} />}
     <div className="brand-orb left-1/2 top-32 h-80 w-80 -translate-x-1/2 bg-brand-pink opacity-[.12]" />
