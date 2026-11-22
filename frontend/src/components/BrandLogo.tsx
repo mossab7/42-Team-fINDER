@@ -5,7 +5,7 @@ export function BrandLogo({ compact = false }: { compact?: boolean }) {
     <span className="font-display text-[1.7rem] font-black leading-none tracking-[-0.12em] text-white">42</span>
     <span className="h-8 w-[3px] -skew-x-12 rounded-full bg-brand-cyan shadow-[0_0_18px_rgba(0,215,215,.6)]" />
     {!compact && <span className="font-display text-xl font-extrabold italic tracking-[-0.04em] text-white">
-      Team<span className="text-brand-pink">Finder</span>
+      <span className="text-brand-pink">T</span>eamF<span className="text-brand-pink">inder</span>
     </span>}
     <Flame size={compact ? 17 : 20} className="-ml-1 text-brand-pink drop-shadow-[0_0_10px_rgba(255,59,124,.55)]" fill="currentColor" />
   </div>
