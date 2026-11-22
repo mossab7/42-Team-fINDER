@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { SearchForm } from './SearchForm'
 import type { ScanConfig } from '../types/api'
@@ -22,8 +22,20 @@ it('opens searchable campus and project menus and applies selections',()=>{
 it('shows the API team range and solo-project action',()=>{
  const {rerender}=render(<SearchForm config={config} setConfig={vi.fn()} campuses={[{id:1,name:'Paris'}]} projects={[{id:101,name:'ft_transcendence'}]} years={[2024]} projectConfiguration={{project_id:101,campus_id:1,project_session_id:10,session_campus_id:1,solo:false,min_team_size:4,max_team_size:5,maximum_source:'group_rule',fetched_at:'2026-01-01',source:'live'}} loading={false} onSubmit={vi.fn()} scanning={false}/>)
  expect(screen.getByText(/42 team range: 4–5/)).toBeInTheDocument()
- expect(within(screen.getByLabelText('Maximum team size')).getAllByRole('option').map(option=>option.textContent)).toEqual(['4','5'])
+ fireEvent.click(screen.getByRole('combobox',{name:'Maximum team size'}))
+ expect(screen.getAllByRole('option').map(option=>option.textContent)).toEqual(['4','5'])
+ fireEvent.click(screen.getByRole('option',{name:'5'}))
  rerender(<SearchForm config={{...config,max_team_size:1,project_solo:true}} setConfig={vi.fn()} campuses={[{id:1,name:'Paris'}]} projects={[{id:104,name:'Libft'}]} years={[2024]} projectConfiguration={{project_id:104,campus_id:1,project_session_id:11,session_campus_id:1,solo:true,min_team_size:1,max_team_size:1,maximum_source:'solo',fetched_at:'2026-01-01',source:'live'}} loading={false} onSubmit={vi.fn()} scanning={false}/>)
  expect(screen.getByRole('button',{name:/find active students/i})).toBeInTheDocument()
  expect(screen.getByLabelText('Maximum team size')).toBeDisabled()
+})
+
+it('uses matching custom dropdowns for promotion and team size',()=>{
+ const setConfig=vi.fn()
+ render(<SearchForm config={config} setConfig={setConfig} campuses={[{id:1,name:'Paris'}]} projects={[{id:101,name:'ft_transcendence'}]} years={[2024,2023]} projectConfiguration={{project_id:101,campus_id:1,solo:false,min_team_size:4,max_team_size:5,maximum_source:'group_rule',fetched_at:'2026-01-01',source:'live'}} loading={false} onSubmit={vi.fn()} scanning={false}/>)
+ fireEvent.click(screen.getByRole('combobox',{name:'Promotion definition'}))
+ fireEvent.click(screen.getByRole('option',{name:'Piscine year / month'}))
+ expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({promotion:expect.objectContaining({type:'piscine'})}))
+ expect(screen.getByRole('combobox',{name:'Promotion year'})).toBeInTheDocument()
+ expect(screen.getByRole('combobox',{name:'Maximum team size'})).toBeInTheDocument()
 })
