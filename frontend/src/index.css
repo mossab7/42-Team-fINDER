@@ -2,10 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #090d12; color: #e5edf5; }
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #070b12; color: #f3f6fa; }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 55% -10%, rgba(53,224,161,.08), transparent 30%), #090d12; }
+html { background: #070b12; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background:
+  radial-gradient(circle at 8% -8%, rgba(0,215,215,.16), transparent 28rem),
+  radial-gradient(circle at 92% 3%, rgba(255,59,124,.13), transparent 30rem),
+  linear-gradient(180deg, #070b12 0%, #090f18 48%, #070b12 100%); }
+body::before { content: ''; position: fixed; inset: 0; pointer-events: none; opacity: .16; background-image: linear-gradient(rgba(148,163,184,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.08) 1px, transparent 1px); background-size: 48px 48px; mask-image: linear-gradient(to bottom, black, transparent 72%); }
 button, input, select { font: inherit; }
 select, input { color-scheme: dark; }
-::-webkit-scrollbar { width: 9px; height: 9px; } ::-webkit-scrollbar-thumb { background: #283440; border-radius: 9px; }
-
+button, a { -webkit-tap-highlight-color: transparent; }
+::selection { background: rgba(255,59,124,.32); color: #fff; }
+::-webkit-scrollbar { width: 9px; height: 9px; } ::-webkit-scrollbar-thumb { background: linear-gradient(#00d7d7,#ff3b7c); border-radius: 9px; }
+.brand-text { background: linear-gradient(100deg, #f8fafc 0%, #f8fafc 38%, #ff3b7c 58%, #ff7a8a 100%); background-clip: text; -webkit-background-clip: text; color: transparent; }
+.brand-border { position: relative; isolation: isolate; }
+.brand-border::before { content: ''; position: absolute; z-index: -1; inset: -1px; border-radius: inherit; padding: 1px; background: linear-gradient(135deg, rgba(0,215,215,.75), rgba(65,80,110,.12) 45%, rgba(255,59,124,.7)); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; }
+.glass-panel { background: linear-gradient(145deg, rgba(17,27,40,.88), rgba(9,14,23,.78)); box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 24px 70px rgba(0,0,0,.3); backdrop-filter: blur(18px); }
+.brand-orb { position: absolute; border-radius: 9999px; filter: blur(80px); pointer-events: none; opacity: .24; }
+@keyframes brand-float { 0%,100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-12px) rotate(1deg); } }
+.brand-float { animation: brand-float 7s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .brand-float { animation: none; } *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }

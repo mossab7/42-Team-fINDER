@@ -18,7 +18,7 @@ export function Avatar({
   login,
   displayName,
   className = 'h-9 w-9 rounded-full border border-line object-cover',
-  fallbackClassName = 'grid h-9 w-9 place-items-center rounded-full bg-accent/10 text-xs font-bold text-accent',
+  fallbackClassName = 'grid h-9 w-9 place-items-center rounded-full border border-brand-cyan/20 bg-gradient-to-br from-brand-cyan/15 to-brand-pink/15 text-xs font-bold text-brand-cyan',
 }: {
   imageUrl?: string
   login: string

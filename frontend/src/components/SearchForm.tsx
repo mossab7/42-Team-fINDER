@@ -4,7 +4,7 @@ import type { Campus, Project, ProjectConfiguration, PromotionType, ScanConfig }
 import { Button, Card, Skeleton } from './ui'
 import { SearchableSelect } from './SearchableSelect'
 
-const field = 'h-11 w-full rounded-lg border border-line bg-[#0b1016] px-3 text-sm text-slate-200 outline-none transition focus:border-accent/60 focus:ring-2 focus:ring-accent/10'
+const field = 'h-11 w-full rounded-xl border border-line bg-[#0a111b] px-3 text-sm text-slate-200 outline-none transition focus:border-brand-cyan/60 focus:ring-4 focus:ring-brand-cyan/10'
 
 function NativeSelect({ children, className = '', ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
   return <div className="relative">
@@ -49,9 +49,9 @@ export function SearchForm({
 
   if (loading) return <Card className="p-5"><div className="grid gap-4 md:grid-cols-4">{[1, 2, 3, 4].map(item => <Skeleton key={item} className="h-16" />)}</div></Card>
 
-  return <Card className="overflow-visible">
+  return <Card className="brand-border overflow-visible">
     <div className="flex items-center justify-between border-b border-line px-5 py-4">
-      <div className="flex items-center gap-2 text-sm font-semibold text-white"><SlidersHorizontal size={16} className="text-accent" />Search criteria</div>
+      <div className="flex items-center gap-2 text-sm font-semibold text-white"><SlidersHorizontal size={16} className="text-brand-pink" />Search criteria</div>
       <div className="text-xs text-slate-500">Selections are remembered on this device</div>
     </div>
     <form onSubmit={submit} className="p-5">
@@ -97,7 +97,7 @@ export function SearchForm({
         <div className="flex items-end xl:col-span-2"><Button className="h-11 w-full" type="submit" disabled={scanning || projectConfigurationLoading || !config.campus_id || !config.project_id || (!config.promotion.year && config.promotion.type !== 'date_range')}><CalendarDays size={16} />{scanning ? 'Scanning…' : projectConfiguration?.solo ? 'Find active students' : 'Find teammates'}</Button></div>
       </div>
       <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-500"><input type="checkbox" checked={config.include_unavailable} onChange={event => change('include_unavailable', event.target.checked)} className="accent-emerald-400" />Show completed and unavailable records in results</label>
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-500"><input type="checkbox" checked={config.include_unavailable} onChange={event => change('include_unavailable', event.target.checked)} className="accent-brand-pink" />Show completed and unavailable records in results</label>
         {onSave && <Button type="button" variant="ghost" onClick={onSave} disabled={!config.campus_id || !config.project_id}><Star size={14} />{saved ? 'Saved' : 'Save search'}</Button>}
       </div>
     </form>

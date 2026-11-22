@@ -7,7 +7,7 @@ export interface SearchableOption {
   description?: string
 }
 
-const field = 'h-11 w-full rounded-lg border border-line bg-[#0b1016] px-3 pr-10 text-sm text-slate-200 outline-none transition focus:border-accent/60 focus:ring-2 focus:ring-accent/10'
+const field = 'h-11 w-full rounded-xl border border-line bg-[#0a111b] px-3 pr-10 text-sm text-slate-200 outline-none transition focus:border-brand-cyan/60 focus:ring-4 focus:ring-brand-cyan/10'
 
 export function SearchableSelect({
   label,
@@ -80,7 +80,7 @@ export function SearchableSelect({
         {query && query !== value ? <Search size={14}/> : <ChevronDown size={14}/>} 
       </button>
     </div>
-    {open && <div id={listId} role="listbox" className="absolute z-30 mt-2 max-h-72 w-full overflow-y-auto rounded-xl border border-line bg-[#0c1218] p-1.5 shadow-2xl shadow-black/50">
+    {open && <div id={listId} role="listbox" className="glass-panel absolute z-30 mt-2 max-h-72 w-full overflow-y-auto rounded-xl border border-line p-1.5 shadow-2xl shadow-black/50">
       {filtered.map(option => <button
         type="button"
         role="option"
@@ -92,7 +92,7 @@ export function SearchableSelect({
           setOpen(false)
           onSelect(option)
         }}
-        className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/[.06] hover:text-white aria-selected:bg-accent/[.08] aria-selected:text-accent"
+        className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/[.06] hover:text-white aria-selected:bg-brand-cyan/[.08] aria-selected:text-brand-cyan"
       >
         <span className="truncate">{option.label}</span>
         {option.description && <span className="shrink-0 text-xs text-slate-600">{option.description}</span>}
