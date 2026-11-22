@@ -49,7 +49,7 @@ export function SearchForm({
 
   if (loading) return <Card className="p-5"><div className="grid gap-4 md:grid-cols-4">{[1, 2, 3, 4].map(item => <Skeleton key={item} className="h-16" />)}</div></Card>
 
-  return <Card className="brand-border overflow-visible">
+  return <Card className="brand-border z-10 overflow-visible">
     <div className="flex items-center justify-between border-b border-line px-5 py-4">
       <div className="flex items-center gap-2 text-sm font-semibold text-white"><SlidersHorizontal size={16} className="text-brand-pink" />Search criteria</div>
       <div className="text-xs text-slate-500">Selections are remembered on this device</div>
