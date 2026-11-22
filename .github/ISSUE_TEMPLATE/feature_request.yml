@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest a focused improvement to 42 Team Finder.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Safety and scope
+      options:
+        - label: This proposal does not require exposing credentials or unnecessary student data.
+          required: true
+        - label: This proposal keeps 42 API interactions read-only.
+          required: true
