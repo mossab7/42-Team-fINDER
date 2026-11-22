@@ -32,8 +32,14 @@ function LoginGate({ reason }: { reason?: string }) {
 
 const links = [['/discover', 'Discover', Compass, 'cyan'], ['/matches', 'Matches', Heart, 'pink'], ['/explore', 'Explore', Search, 'cyan']] as const
 
-function Navigation() {
-  return <nav aria-label="Main navigation" className="sticky top-0 z-20 border-b border-line/80 bg-[#070b12]/90 px-4 backdrop-blur-xl sm:px-8"><div className="mx-auto flex max-w-7xl gap-1 overflow-x-auto py-2">{links.map(([to, label, Icon, tone]) => <NavLink key={to} to={to} className={({ isActive }) => `relative inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${isActive ? tone === 'pink' ? 'bg-brand-pink/10 text-pink-200' : 'bg-brand-cyan/10 text-cyan-100' : 'text-slate-500 hover:bg-white/[.04] hover:text-white'}`}>{({ isActive }) => <><Icon size={16} fill={label === 'Matches' && isActive ? 'currentColor' : 'none'} />{label}{isActive && <span className={`absolute inset-x-4 -bottom-2 h-0.5 rounded-full ${tone === 'pink' ? 'bg-brand-pink shadow-[0_0_12px_rgba(255,59,124,.8)]' : 'bg-brand-cyan shadow-[0_0_12px_rgba(0,215,215,.8)]'}`} />}</>}</NavLink>)}</div></nav>
+export function Navigation() {
+  const matches = useQuery({ queryKey: ['matches'], queryFn: api.matches, refetchInterval: 15_000 })
+  const hasMatches = Boolean(matches.data?.items.length)
+
+  return <nav aria-label="Main navigation" className="sticky top-0 z-20 border-b border-line/80 bg-[#070b12]/90 px-4 backdrop-blur-xl sm:px-8"><div className="mx-auto flex max-w-7xl gap-1 overflow-x-auto py-2">{links.map(([to, label, Icon, tone]) => {
+    const isMatches = label === 'Matches'
+    return <NavLink key={to} to={to} aria-label={isMatches && hasMatches ? `Matches, ${matches.data!.items.length} waiting` : label} className={({ isActive }) => `relative inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${isActive ? tone === 'pink' ? 'bg-brand-pink/10 text-pink-200' : 'bg-brand-cyan/10 text-cyan-100' : 'text-slate-500 hover:bg-white/[.04] hover:text-white'}`}>{({ isActive }) => <><span className="relative inline-flex"><Icon data-testid={isMatches ? 'matches-nav-icon' : undefined} size={16} fill={isMatches && (hasMatches || isActive) ? 'currentColor' : 'none'} className={isMatches && hasMatches ? 'text-brand-pink drop-shadow-[0_0_7px_rgba(255,59,124,.9)]' : undefined} />{isMatches && hasMatches && <span aria-hidden="true" className="absolute -right-1 -top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-brand-pink shadow-[0_0_7px_rgba(255,59,124,1)]" />}</span>{label}{isActive && <span className={`absolute inset-x-4 -bottom-2 h-0.5 rounded-full ${tone === 'pink' ? 'bg-brand-pink shadow-[0_0_12px_rgba(255,59,124,.8)]' : 'bg-brand-cyan shadow-[0_0_12px_rgba(0,215,215,.8)]'}`} />}</>}</NavLink>
+  })}</div></nav>
 }
 
 export default function App() {
