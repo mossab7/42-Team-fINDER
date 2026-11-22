@@ -22,4 +22,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .brand-orb { position: absolute; border-radius: 9999px; filter: blur(80px); pointer-events: none; opacity: .24; }
 @keyframes brand-float { 0%,100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-12px) rotate(1deg); } }
 .brand-float { animation: brand-float 7s ease-in-out infinite; }
+@keyframes match-sparkle { 0% { opacity: 0; transform: translate(-50%,-50%) scale(.15) rotate(0); } 18% { opacity: 1; } 72% { opacity: 1; } 100% { opacity: 0; transform: translate(calc(-50% + var(--spark-x)), calc(-50% + var(--spark-y))) scale(1.25) rotate(200deg); } }
+@keyframes match-pop { 0% { opacity: 0; transform: scale(.72) translateY(18px); } 65% { transform: scale(1.035) translateY(-2px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
+.match-sparkle { opacity: 0; line-height: 1; text-shadow: 0 0 14px currentColor; animation: match-sparkle 1.35s cubic-bezier(.18,.72,.25,1) forwards; }
+.match-pop { animation: match-pop .48s cubic-bezier(.16,1,.3,1) both; }
 @media (prefers-reduced-motion: reduce) { .brand-float { animation: none; } *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }

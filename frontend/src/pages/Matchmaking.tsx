@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, Heart, Layers3, LoaderCircle, MousePointerClick, Sparkles, X } from 'lucide-react'
 import { api, type StudentProfile } from '../services/api'
@@ -41,18 +42,48 @@ function CandidateCard({ person, onSwipe }: { person: StudentProfile; onSwipe: (
   </article>
 }
 
+const celebrationParticles = Array.from({ length: 30 }, (_, index) => {
+  const angle = (index / 30) * Math.PI * 2
+  const distance = 120 + (index % 5) * 34
+  return {
+    x: Math.cos(angle) * distance,
+    y: Math.sin(angle) * distance,
+    delay: (index % 6) * 0.045,
+    symbol: index % 4 === 0 ? '♥' : '✦',
+    size: 12 + (index % 4) * 5,
+  }
+})
+
+function MatchCelebration({ person, onClose }: { person: StudentProfile; onClose: () => void }) {
+  return <div role="dialog" aria-modal="true" aria-labelledby="match-title" className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-[#03060b]/80 p-5 backdrop-blur-lg" onClick={onClose}>
+    <div aria-hidden className="pointer-events-none absolute inset-0">
+      {celebrationParticles.map((particle, index) => <span key={index} className={`match-sparkle absolute left-1/2 top-1/2 ${particle.symbol === '♥' ? 'text-brand-pink' : 'text-brand-cyan'}`} style={{ '--spark-x': `${particle.x}px`, '--spark-y': `${particle.y}px`, animationDelay: `${particle.delay}s`, fontSize: particle.size } as CSSProperties}>{particle.symbol}</span>)}
+    </div>
+    <section className="match-pop glass-panel brand-border relative w-full max-w-md overflow-hidden rounded-[2rem] p-7 text-center shadow-[0_30px_100px_rgba(255,59,124,.3)] sm:p-9" onClick={event => event.stopPropagation()}>
+      <div className="absolute -left-20 -top-24 h-56 w-56 rounded-full bg-brand-cyan/20 blur-3xl" /><div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-brand-pink/25 blur-3xl" />
+      <div className="relative mx-auto w-fit"><Avatar imageUrl={person.image_url || undefined} login={person.login} displayName={person.display_name} className="h-28 w-28 rounded-[1.75rem] border-4 border-brand-pink/70 object-cover shadow-[0_0_40px_rgba(255,59,124,.3)]" fallbackClassName="grid h-28 w-28 place-items-center rounded-[1.75rem] border-4 border-brand-pink/70 bg-gradient-to-br from-brand-cyan/20 to-brand-pink/20 text-2xl font-black text-white" /><span className="absolute -bottom-3 -right-3 grid h-11 w-11 place-items-center rounded-full border-4 border-[#0d1520] bg-brand-pink text-white shadow-pink-glow"><Heart size={19} fill="currentColor" /></span></div>
+      <p className="relative mb-2 mt-7 text-xs font-bold uppercase tracking-[.24em] text-brand-cyan">Mutual interest</p>
+      <h2 id="match-title" className="relative m-0 font-display text-4xl font-black tracking-[-.04em] text-white">It’s a <span className="text-brand-pink">match!</span></h2>
+      <p className="relative mx-auto mt-4 max-w-sm text-sm leading-6 text-slate-300"><strong className="text-white">{person.display_name}</strong> already swiped right on you too. You both want to team up.</p>
+      <div className="relative mt-7 grid gap-3 sm:grid-cols-2"><button type="button" onClick={onClose} className="h-12 rounded-xl border border-line bg-white/[.035] px-4 text-sm font-semibold text-slate-200 transition hover:border-brand-cyan/40 hover:bg-brand-cyan/[.07]">Keep swiping</button><Link to="/matches" className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-brand-pink px-4 text-sm font-bold text-white shadow-pink-glow transition hover:-translate-y-0.5 hover:bg-[#ff578d]"><Heart size={16} fill="currentColor" />View matches</Link></div>
+    </section>
+  </div>
+}
+
 export function Discover() {
   const queryClient = useQueryClient()
   const projects = useQuery({ queryKey: ['discover-projects'], queryFn: api.discoverProjects })
   const [project, setProject] = useState<number>()
   const [dismissed, setDismissed] = useState<number[]>([])
+  const [matchedPerson, setMatchedPerson] = useState<StudentProfile>()
   const candidates = useQuery({ queryKey: ['candidates', project], queryFn: () => api.candidates(project!), enabled: !!project })
   useEffect(() => { if (!project && projects.data?.items[0]) setProject(projects.data.items[0].id) }, [projects.data, project])
-  useEffect(() => setDismissed([]), [project])
-  const swipe = useMutation({ mutationFn: ({ id, direction }: { id: number; direction: 'left' | 'right' }) => api.swipe(id, project!, direction), onSuccess: result => { queryClient.invalidateQueries({ queryKey: ['candidates', project] }); if (result.matched) queryClient.invalidateQueries({ queryKey: ['matches'] }) }, onError: (_error, variables) => setDismissed(current => current.filter(id => id !== variables.id)) })
+  useEffect(() => { setDismissed([]); setMatchedPerson(undefined) }, [project])
+  const swipe = useMutation({ mutationFn: ({ id, direction }: { id: number; direction: 'left' | 'right'; person: StudentProfile }) => api.swipe(id, project!, direction), onSuccess: (result, variables) => { queryClient.invalidateQueries({ queryKey: ['candidates', project] }); if (result.matched) { queryClient.invalidateQueries({ queryKey: ['matches'] }); if (variables.direction === 'right') setMatchedPerson(variables.person) } }, onError: (_error, variables) => setDismissed(current => current.filter(id => id !== variables.id)) })
   const person = candidates.data?.items.find(candidate => !dismissed.includes(candidate.user_id))
-  const act = (direction: 'left' | 'right') => { if (!person) return; setDismissed(current => [...current, person.user_id]); swipe.mutate({ id: person.user_id, direction }) }
+  const act = (direction: 'left' | 'right') => { if (!person) return; setDismissed(current => [...current, person.user_id]); swipe.mutate({ id: person.user_id, direction, person }) }
   return <section className="relative mx-auto max-w-7xl px-5 py-8 sm:px-8 lg:py-12">
+    {matchedPerson && <MatchCelebration person={matchedPerson} onClose={() => setMatchedPerson(undefined)} />}
     <div className="brand-orb left-1/2 top-32 h-80 w-80 -translate-x-1/2 bg-brand-pink opacity-[.12]" />
     <div className="relative mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between"><div><p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[.2em] text-brand-cyan"><Sparkles size={14} />Verified project peers</p><h1 className="m-0 font-display text-4xl font-black tracking-[-.04em] text-white sm:text-5xl">Find your next <span className="text-brand-pink">teammate</span></h1><p className="mb-0 mt-3 text-sm text-slate-500">Interested or pass—mutual interest becomes a match.</p></div><label className="w-full lg:max-w-sm"><span className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-500">Choose project</span><select aria-label="Project" className={field} value={project || ''} onChange={event => setProject(Number(event.target.value))}><option value="">Choose a project</option>{projects.data?.items.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div>
     {projects.isLoading || candidates.isLoading ? <div className="grid min-h-96 place-items-center text-brand-cyan"><LoaderCircle size={30} className="animate-spin" /></div> : projects.isError || candidates.isError ? <Empty title="No eligible project scan" detail={(projects.error || candidates.error)?.message || 'Try again after the next 42 data refresh.'} /> : !projects.data?.items.length ? <Empty title="No projects to match right now" detail="Only subscribed, unlocked group projects from verified 42 data appear here." /> : !person ? <Empty title="You’re all caught up" detail="There are no additional verified peers for this project." /> : <><CandidateCard key={person.user_id} person={person} onSwipe={act} /><div className="mx-auto mt-7 flex max-w-md items-center justify-center gap-7"><button aria-label="Pass" className="grid h-16 w-16 place-items-center rounded-full border border-slate-600 bg-[#111925] text-slate-300 shadow-xl transition hover:-translate-y-1 hover:border-slate-400 hover:text-white active:scale-95" onClick={() => act('left')}><X size={27} /></button><button aria-label="Interested" className="grid h-16 w-16 place-items-center rounded-full border border-pink-200/50 bg-brand-pink text-white shadow-[0_12px_40px_rgba(255,59,124,.38)] transition hover:-translate-y-1 hover:bg-[#ff578d] active:scale-95" onClick={() => act('right')}><Heart size={27} fill="currentColor" /></button></div><p className="mt-4 text-center text-xs text-slate-600">Pass <span className="mx-2 text-slate-700">·</span> Interested</p></>}
