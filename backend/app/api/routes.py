@@ -518,6 +518,7 @@ async def discover_candidates(project_id: int, level_min: float | None = None, l
         items.append({"user_id": int(result["id"]), "login": result.get("login", "unknown"),
                       "display_name": result.get("display_name", result.get("login", "Unknown")),
                       "image_url": result.get("image_url"), "campus_name": result.get("campus"),
+                      "profile_url": result.get("profile_url"),
                       "campus_id": actor.campus_id, "level": level, "biography": "", "skills": [],
                       "languages": [], "availability": "", "working_hours": "", "github_url": None,
                       "visible": True})

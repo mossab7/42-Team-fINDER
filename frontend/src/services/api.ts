@@ -42,7 +42,7 @@ export const api = {
   leaveTeam: (id:number) => request<void>(`/teams/${id}/members/me`,{method:'DELETE'}),
 }
 
-export type StudentProfile={user_id:number;login:string;display_name:string;image_url?:string|null;campus_name?:string|null;campus_id?:number|null;level?:number|null;biography:string;skills:string[];languages:string[];availability:string;working_hours:string;github_url?:string|null;visible:boolean}
+export type StudentProfile={user_id:number;login:string;display_name:string;image_url?:string|null;profile_url?:string|null;campus_name?:string|null;campus_id?:number|null;level?:number|null;biography:string;skills:string[];languages:string[];availability:string;working_hours:string;github_url?:string|null;visible:boolean}
 export type MatchProject={id:number;name:string;maximum_team_size:number;campus_id?:number|null}
 export type MatchItem={id:number;project_id:number;project_name:string;created_at:string;profile:StudentProfile}
 export type NotificationItem={id:number;type:string;title:string;body:string;payload:Record<string,unknown>;read:boolean;created_at:string}
