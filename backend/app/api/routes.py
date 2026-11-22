@@ -409,6 +409,32 @@ async def latest_project_scan(session: AsyncSession, project_id: int, campus_id:
     raise HTTPException(409, "No completed eligibility scan is available for this project. Run a scan in Explore first.")
 
 
+async def actor_has_active_group_registration(actor: StudentProfile, project_id: int, session: AsyncSession) -> bool:
+    """Verify the caller's own registration before exposing/swiping peers."""
+    if get_settings().use_demo_data:
+        try:
+            return actor.user_id in eligible_student_ids(await latest_project_scan(session, project_id, actor.campus_id))
+        except HTTPException:
+            return False
+    if not actor.campus_id:
+        return False
+    client = FortyTwoClient(get_settings())
+    try:
+        rows = await client.get_all("/projects_users", params={"filter[user_id]": actor.user_id,
+                                                                  "filter[project_id]": project_id})
+        registration = next((item for item in rows if item.get("status") in {"in_progress", "searching_a_group", "waiting_to_start"}
+                             and not item.get("marked_at") and item.get("validated?") is not True
+                             and not item.get("current_team_id")), None)
+        if not registration:
+            return False
+        project = (await client.request("GET", f"/projects/{project_id}")).json()
+        return not derive_project_configuration(select_project_session(project, actor.campus_id))["solo"]
+    except FortyTwoAPIError:
+        return False
+    finally:
+        await client.close()
+
+
 async def active_match_for(session: AsyncSession, user_id: int, other_id: int, project_id: int) -> Match | None:
     low, high = sorted((user_id, other_id))
     return await session.scalar(select(Match).where(Match.project_id == project_id, Match.user_low_id == low,
@@ -418,6 +444,37 @@ async def active_match_for(session: AsyncSession, user_id: int, other_id: int, p
 @router.get("/discover/projects")
 async def discover_projects(request: Request, session: AsyncSession = Depends(get_session)):
     actor = await matchmaking_actor(request, session)
+    # The selector is based on the student's own current 42 registrations,
+    # rather than merely whether they happened to be in an older cohort scan.
+    # We still require a completed scan later to safely enumerate peers.
+    if not get_settings().use_demo_data and actor.campus_id:
+        client = FortyTwoClient(get_settings())
+        try:
+            registrations = await client.get_all("/projects_users", params={"filter[user_id]": actor.user_id})
+            items: list[dict] = []
+            for registration in registrations:
+                status = registration.get("status")
+                project = registration.get("project") or {}
+                project_id = project.get("id") or registration.get("project_id")
+                if (not isinstance(project_id, int) or status not in {"in_progress", "searching_a_group", "waiting_to_start"}
+                        or registration.get("marked_at") or registration.get("validated?") is True
+                        or registration.get("current_team_id")):
+                    continue
+                detail = (await client.request("GET", f"/projects/{project_id}")).json()
+                constraints = derive_project_configuration(select_project_session(detail, actor.campus_id))
+                if constraints["solo"]:
+                    continue
+                items.append({"id": project_id, "name": project.get("name") or detail.get("name") or f"Project {project_id}",
+                              "maximum_team_size": constraints["max_team_size"], "campus_id": actor.campus_id,
+                              "scanned_at": None})
+            return {"items": items, "source": "your active 42 project registrations"}
+        except FortyTwoAPIError as exc:
+            # The scan fallback remains useful during temporary 42 rate limits.
+            fallback_warning = str(exc)
+        finally:
+            await client.close()
+    else:
+        fallback_warning = None
     scans = (await session.scalars(select(Scan).where(Scan.status == "completed").order_by(desc(Scan.completed_at)).limit(100))).all()
     seen: set[int] = set(); items: list[dict] = []
     for scan in scans:
@@ -433,7 +490,7 @@ async def discover_projects(request: Request, session: AsyncSession = Depends(ge
         seen.add(project_id)
         items.append({"id": project_id, "name": details[0], "maximum_team_size": details[1],
                       "campus_id": details[2], "scanned_at": scan.data_retrieved_at or scan.completed_at})
-    return {"items": items, "source": "completed eligibility scans"}
+    return {"items": items, "source": "completed eligibility scans", "warning": fallback_warning}
 
 
 @router.get("/discover/candidates")
@@ -442,8 +499,8 @@ async def discover_candidates(project_id: int, level_min: float | None = None, l
                               session: AsyncSession = Depends(get_session)):
     actor = await matchmaking_actor(request, session)
     scan = await latest_project_scan(session, project_id, actor.campus_id)
-    if actor.user_id not in eligible_student_ids(scan):
-        raise HTTPException(403, "Your eligibility for this project is not verified by the current scan.")
+    if not await actor_has_active_group_registration(actor, project_id, session):
+        raise HTTPException(403, "Your active 42 registration for this group project could not be verified.")
     target_ids = eligible_student_ids(scan) - {actor.user_id}
     if not target_ids:
         return {"items": [], "scan_id": scan.id, "data_retrieved_at": scan.data_retrieved_at}
@@ -481,7 +538,7 @@ async def create_swipe(payload: dict, request: Request, session: AsyncSession = 
     scan = await latest_project_scan(session, project_id, actor.campus_id)
     eligible = eligible_student_ids(scan)
     target = await session.get(StudentProfile, target_id)
-    if actor.user_id not in eligible or target_id not in eligible:
+    if target_id not in eligible or not await actor_has_active_group_registration(actor, project_id, session):
         raise HTTPException(403, "Both students must be verified as eligible in the same completed scan")
     swipe = await session.scalar(select(Swipe).where(Swipe.swiper_user_id == actor.user_id,
         Swipe.target_user_id == target_id, Swipe.project_id == project_id))
