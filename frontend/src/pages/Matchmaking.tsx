@@ -110,11 +110,7 @@ function MatchCelebration({ person, onClose }: { person: StudentProfile; onClose
 
 export function Discover() {
   const queryClient = useQueryClient()
-  const projects = useQuery({
-    queryKey: ['discover-projects'],
-    queryFn: api.discoverProjects,
-    refetchInterval: query => query.state.data?.catalog_ready === false ? 1500 : false,
-  })
+  const projects = useQuery({ queryKey: ['discover-projects'], queryFn: api.discoverProjects })
   const [project, setProject] = useState<number>()
   const [dismissed, setDismissed] = useState<number[]>([])
   const [matchedPerson, setMatchedPerson] = useState<StudentProfile>()

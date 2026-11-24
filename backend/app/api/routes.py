@@ -7,7 +7,7 @@ from typing import Literal
 
 import secrets
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import delete, desc, select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,8 +24,7 @@ from app.services.fortytwo import FortyTwoAPIError, FortyTwoClient
 from app.services.project_configuration import derive_project_configuration, select_project_session
 from app.services.scanner import create_scan
 from app.services.auth import (OAUTH_STATE_COOKIE, SESSION_COOKIE, authorization_url, create_session,
-                               AUTHORIZED_PROJECTS_CACHE, current_user, exchange_code, new_state, revoke_session,
-                               sync_authorized_projects)
+                               current_user, exchange_code, new_state, revoke_session)
 
 router = APIRouter(prefix="/api")
 
@@ -58,8 +57,7 @@ async def auth_login():
 
 
 @router.get("/auth/callback")
-async def auth_callback(request: Request, background_tasks: BackgroundTasks,
-                        code: str | None = None, state: str | None = None,
+async def auth_callback(request: Request, code: str | None = None, state: str | None = None,
                         error: str | None = None, session: AsyncSession = Depends(get_session)):
     settings = get_settings()
     failure_url = f"{settings.public_base_url.rstrip('/')}/?auth=failed"
@@ -67,15 +65,8 @@ async def auth_callback(request: Request, background_tasks: BackgroundTasks,
     if error or not code or not state or not expected_state or not secrets.compare_digest(state, expected_state):
         return RedirectResponse(failure_url, status_code=302)
     try:
-        identity = await exchange_code(settings, code)
-        profile = identity.profile
+        profile = await exchange_code(settings, code)
         raw_token = await create_session(session, settings, profile)
-        # The paginated user-context catalogue is optional enrichment and can
-        # be slow. Run it only after the redirect has been sent so login itself
-        # depends on two 42 calls (token + profile), not every project page.
-        background_tasks.add_task(
-            sync_authorized_projects, settings, int(profile["id"]), identity.access_token
-        )
     except PermissionError:
         return RedirectResponse(f"{failure_url}&reason=not_student", status_code=302)
     except (httpx.HTTPError, RuntimeError):
@@ -397,21 +388,13 @@ ACTIVE_MATCHMAKING_STATUSES = {"in_progress", "searching_a_group", "waiting_to_s
 
 
 def discover_registration_state(registration: dict) -> str | None:
-    """Classify only explicit 42 registration states for the project picker.
-
-    ``available`` is 42's evidence that the project is unlocked for the
-    student, but it is not evidence that they enrolled.  Keeping it distinct
-    from active registrations lets the UI advertise the option without ever
-    exposing peers or accepting swipes prematurely.
-    """
+    """Classify only explicit active enrollment states for the project picker."""
     if (registration.get("locked?") is True or registration.get("marked_at")
             or registration.get("validated?") is True or registration.get("current_team_id")):
         return None
     status = registration.get("status")
     if status in ACTIVE_MATCHMAKING_STATUSES:
         return "subscribed"
-    if status == "available":
-        return "eligible"
     return None
 
 
@@ -480,33 +463,28 @@ async def discover_projects(request: Request, session: AsyncSession = Depends(ge
         client = FortyTwoClient(get_settings())
         try:
             registrations = await client.get_all("/projects_users", params={"filter[user_id]": actor.user_id})
+            allowed_projects = await client.get_allowed_registration_projects(actor.user_id)
             # A student can have more than one projects_user occurrence. Keep
-            # one entry per project and prefer an active registration over an
-            # older ``available`` occurrence.
+            # one entry per project and keep only active enrollment states.
             registrations_by_project: dict[int, tuple[dict, str]] = {}
-            known_registration_ids: set[int] = set()
             for registration in registrations:
                 project = registration.get("project") or {}
                 project_id = project.get("id") or registration.get("project_id")
-                if isinstance(project_id, int):
-                    known_registration_ids.add(project_id)
                 state = discover_registration_state(registration)
                 if not isinstance(project_id, int) or state is None:
                     continue
                 previous = registrations_by_project.get(project_id)
-                if previous and (previous[1] == "subscribed" or state == "eligible"):
+                if previous:
                     continue
                 registrations_by_project[project_id] = (registration, state)
 
-            # /me/projects is captured during OAuth sign-in because this
-            # user-context endpoint is unavailable to client credentials. Any
-            # project absent from projects_users is offered by Intra but not
-            # yet subscribed. Never infer eligibility from global project data.
-            catalog_cache = CacheRepository(session, get_settings().session_ttl_hours * 3600)
-            cached_catalog = await catalog_cache.get(AUTHORIZED_PROJECTS_CACHE, str(actor.user_id), allow_stale=True)
-            for project in cached_catalog[0] if cached_catalog else []:
+            # This documented endpoint returns only projects for which this
+            # particular user can currently register. /me/projects is merely
+            # the resource owner's full project catalogue and is not evidence
+            # of eligibility.
+            for project in allowed_projects:
                 project_id = project.get("id")
-                if not isinstance(project_id, int) or project_id in known_registration_ids:
+                if not isinstance(project_id, int) or project_id in registrations_by_project:
                     continue
                 registrations_by_project[project_id] = (
                     {"project": project, "project_id": project_id, "status": "available"}, "eligible"
@@ -527,8 +505,7 @@ async def discover_projects(request: Request, session: AsyncSession = Depends(ge
                               "subscription_status": state, "registration_status": registration.get("status"),
                               "scanned_at": None})
             items.sort(key=lambda item: (item["subscription_status"] != "subscribed", item["name"].lower()))
-            return {"items": items, "source": "your active and available 42 projects",
-                    "catalog_ready": cached_catalog is not None}
+            return {"items": items, "source": "your active registrations and 42 registration eligibility"}
         except FortyTwoAPIError as exc:
             # The scan fallback remains useful during temporary 42 rate limits.
             fallback_warning = str(exc)
@@ -553,8 +530,7 @@ async def discover_projects(request: Request, session: AsyncSession = Depends(ge
                       "campus_id": details[2], "subscription_status": "subscribed",
                       "registration_status": "verified_by_scan",
                       "scanned_at": scan.data_retrieved_at or scan.completed_at})
-    return {"items": items, "source": "completed eligibility scans", "warning": fallback_warning,
-            "catalog_ready": True}
+    return {"items": items, "source": "completed eligibility scans", "warning": fallback_warning}
 
 
 @router.get("/discover/candidates")

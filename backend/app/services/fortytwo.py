@@ -192,6 +192,14 @@ class FortyTwoClient:
         """Return teams for a project via the documented filterable index."""
         return await self.get_all("/teams", params={"filter[project_id]": project_id})
 
+    async def get_allowed_registration_projects(self, user_id: int) -> list[dict[str, Any]]:
+        """Return projects the documented registration endpoint allows for one user."""
+        response = await self.request("GET", f"/users/{user_id}/projects_users/registration")
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise FortyTwoAPIError("Unexpected response shape for allowed registration projects")
+        return [item for item in payload if isinstance(item, dict)]
+
     async def get_project_users(
         self, project_id: int, user_ids: list[int], *, batch_size: int = 75
     ) -> list[dict[str, Any]]:

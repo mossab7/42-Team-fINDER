@@ -2,6 +2,7 @@ from datetime import timedelta
 
 import pytest
 
+from app.api import routes
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.models.database import Scan, StudentProfile, utcnow
@@ -19,9 +20,64 @@ def eligible_student(user_id: int, login: str) -> dict:
 def test_discover_registration_state_keeps_eligibility_separate_from_enrollment():
     assert discover_registration_state({"status": "searching_a_group"}) == "subscribed"
     assert discover_registration_state({"status": "in_progress"}) == "subscribed"
-    assert discover_registration_state({"status": "available", "locked?": False}) == "eligible"
+    assert discover_registration_state({"status": "available", "locked?": False}) is None
     assert discover_registration_state({"status": "available", "locked?": True}) is None
     assert discover_registration_state({"status": "finished", "validated?": True}) is None
+
+
+@pytest.mark.asyncio
+async def test_project_picker_uses_only_documented_registration_eligibility(client, monkeypatch):
+    settings = get_settings()
+    previous_demo_mode = settings.demo_mode
+    settings.demo_mode = False
+    group_session = {"id": 1, "campus_id": 9, "cursus_id": 21, "solo": False, "max_people": 5}
+    solo_session = {"id": 2, "campus_id": 9, "cursus_id": 21, "solo": True, "max_people": 1}
+    calls: list[str] = []
+
+    class FakeClient:
+        def __init__(self, _settings):
+            pass
+
+        async def get_all(self, path, **_kwargs):
+            calls.append(path)
+            return [{
+                "project": {"id": 10, "name": "Subscribed", "slug": "subscribed",
+                            "project_sessions": [group_session]},
+                "status": "in_progress",
+            }]
+
+        async def get_allowed_registration_projects(self, user_id):
+            calls.append(f"/users/{user_id}/projects_users/registration")
+            return [
+                {"id": 20, "name": "Actually eligible", "slug": "actually-eligible",
+                 "project_sessions": [group_session]},
+                {"id": 30, "name": "Eligible solo", "slug": "eligible-solo",
+                 "project_sessions": [solo_session]},
+            ]
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(routes, "FortyTwoClient", FakeClient)
+    try:
+        async with SessionLocal() as session:
+            token = await create_session(session, settings, {
+                "id": 1337,
+                "login": "eligible",
+                "usual_full_name": "Eligible Student",
+                "campus": [{"id": 9, "name": "Paris"}],
+                "cursus_users": [{"id": 1, "level": 5.0}],
+            })
+        client.cookies.set("team_finder_session", token)
+        response = await client.get("/api/discover/projects")
+        assert response.status_code == 200
+        assert [(item["id"], item["subscription_status"]) for item in response.json()["items"]] == [
+            (10, "subscribed"),
+            (20, "eligible"),
+        ]
+        assert calls == ["/projects_users", "/users/1337/projects_users/registration"]
+    finally:
+        settings.demo_mode = previous_demo_mode
 
 
 @pytest.mark.asyncio
