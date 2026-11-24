@@ -3,7 +3,7 @@ import pytest
 from app.api import routes
 from app.core.config import get_settings
 from app.core.database import SessionLocal
-from app.services.auth import OAUTH_STATE_COOKIE, SESSION_COOKIE, authorization_url, create_session
+from app.services.auth import OAUTH_STATE_COOKIE, SESSION_COOKIE, OAuthIdentity, authorization_url, create_session
 from app.services.auth import AUTHORIZED_PROJECTS_CACHE
 from app.repositories.cache import CacheRepository
 
@@ -54,16 +54,27 @@ async def test_required_mode_blocks_data_but_accepts_42_callback(client, monkeyp
     previous = settings.auth_required
     settings.auth_required = True
 
+    synced = []
+
     async def profile(*_args, **_kwargs):
-        return {"id": 84, "login": "student", "usual_full_name": "Student 42", "cursus_users": [{"id": 1}]}
+        return OAuthIdentity(
+            profile={"id": 84, "login": "student", "usual_full_name": "Student 42",
+                     "cursus_users": [{"id": 1}]},
+            access_token="ephemeral-token",
+        )
+
+    async def sync_projects(_settings, user_id, access_token):
+        synced.append((user_id, access_token))
 
     monkeypatch.setattr(routes, "exchange_code", profile)
+    monkeypatch.setattr(routes, "sync_authorized_projects", sync_projects)
     try:
         assert (await client.get("/api/campuses")).status_code == 401
         client.cookies.set(OAUTH_STATE_COOKIE, "correct")
         callback = await client.get("/api/auth/callback?code=code&state=correct", follow_redirects=False)
         assert callback.status_code == 302
         assert "team_finder_session=" in callback.headers["set-cookie"]
+        assert synced == [(84, "ephemeral-token")]
         assert (await client.get("/api/campuses")).status_code == 200
     finally:
         settings.auth_required = previous

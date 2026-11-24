@@ -26,7 +26,7 @@ export const api = {
   savedSearches: () => request<{id:number;name:string;configuration:ScanConfig;created_at:string}[]>('/saved-searches'),
   saveSearch: (name: string, configuration: ScanConfig) => request<{id:number;name:string;configuration:ScanConfig;created_at:string}>('/saved-searches', { method: 'POST', body: JSON.stringify({name, configuration}) }),
   exportUrl: (id: string, format: 'csv'|'json') => `${API}/scans/${id}/export?format=${format}`,
-  discoverProjects: () => request<{items:MatchProject[]}>('/discover/projects'),
+  discoverProjects: () => request<{items:MatchProject[];catalog_ready?:boolean}>('/discover/projects'),
   candidates: (projectId:number, params = new URLSearchParams()) => request<{items:StudentProfile[];scan_id:string}>(`/discover/candidates?project_id=${projectId}&${params}`),
   swipe: (target_user_id:number, project_id:number, direction:'left'|'right') => request<{matched:boolean;match_id:number|null}>('/swipes', {method:'POST',body:JSON.stringify({target_user_id,project_id,direction})}),
   myProfile: () => request<StudentProfile>('/profile/me'),

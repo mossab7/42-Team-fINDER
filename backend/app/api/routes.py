@@ -7,7 +7,7 @@ from typing import Literal
 
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import delete, desc, select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +24,8 @@ from app.services.fortytwo import FortyTwoAPIError, FortyTwoClient
 from app.services.project_configuration import derive_project_configuration, select_project_session
 from app.services.scanner import create_scan
 from app.services.auth import (OAUTH_STATE_COOKIE, SESSION_COOKIE, authorization_url, create_session,
-                               AUTHORIZED_PROJECTS_CACHE, current_user, exchange_code, new_state, revoke_session)
+                               AUTHORIZED_PROJECTS_CACHE, current_user, exchange_code, new_state, revoke_session,
+                               sync_authorized_projects)
 
 router = APIRouter(prefix="/api")
 
@@ -57,7 +58,8 @@ async def auth_login():
 
 
 @router.get("/auth/callback")
-async def auth_callback(request: Request, code: str | None = None, state: str | None = None,
+async def auth_callback(request: Request, background_tasks: BackgroundTasks,
+                        code: str | None = None, state: str | None = None,
                         error: str | None = None, session: AsyncSession = Depends(get_session)):
     settings = get_settings()
     failure_url = f"{settings.public_base_url.rstrip('/')}/?auth=failed"
@@ -65,8 +67,15 @@ async def auth_callback(request: Request, code: str | None = None, state: str | 
     if error or not code or not state or not expected_state or not secrets.compare_digest(state, expected_state):
         return RedirectResponse(failure_url, status_code=302)
     try:
-        profile = await exchange_code(settings, code)
+        identity = await exchange_code(settings, code)
+        profile = identity.profile
         raw_token = await create_session(session, settings, profile)
+        # The paginated user-context catalogue is optional enrichment and can
+        # be slow. Run it only after the redirect has been sent so login itself
+        # depends on two 42 calls (token + profile), not every project page.
+        background_tasks.add_task(
+            sync_authorized_projects, settings, int(profile["id"]), identity.access_token
+        )
     except PermissionError:
         return RedirectResponse(f"{failure_url}&reason=not_student", status_code=302)
     except (httpx.HTTPError, RuntimeError):
@@ -518,7 +527,8 @@ async def discover_projects(request: Request, session: AsyncSession = Depends(ge
                               "subscription_status": state, "registration_status": registration.get("status"),
                               "scanned_at": None})
             items.sort(key=lambda item: (item["subscription_status"] != "subscribed", item["name"].lower()))
-            return {"items": items, "source": "your active and available 42 projects"}
+            return {"items": items, "source": "your active and available 42 projects",
+                    "catalog_ready": cached_catalog is not None}
         except FortyTwoAPIError as exc:
             # The scan fallback remains useful during temporary 42 rate limits.
             fallback_warning = str(exc)
@@ -543,7 +553,8 @@ async def discover_projects(request: Request, session: AsyncSession = Depends(ge
                       "campus_id": details[2], "subscription_status": "subscribed",
                       "registration_status": "verified_by_scan",
                       "scanned_at": scan.data_retrieved_at or scan.completed_at})
-    return {"items": items, "source": "completed eligibility scans", "warning": fallback_warning}
+    return {"items": items, "source": "completed eligibility scans", "warning": fallback_warning,
+            "catalog_ready": True}
 
 
 @router.get("/discover/candidates")
