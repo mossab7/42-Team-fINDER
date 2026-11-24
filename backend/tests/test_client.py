@@ -141,6 +141,29 @@ async def test_project_teams_uses_filterable_teams_index():
 
 
 @pytest.mark.asyncio
+async def test_allowed_projects_uses_documented_registration_endpoint():
+    observed: list[str] = []
+
+    async def handler(request: httpx.Request):
+        if request.url.path == "/oauth/token":
+            return httpx.Response(200, json={"access_token": "ok", "expires_in": 7200})
+        observed.append(request.url.path)
+        return httpx.Response(200, json=[{"id": 42, "name": "Allowed group project"}])
+
+    settings = Settings(
+        ft_client_id="id", ft_client_secret="secret",
+        ft_api_base_url="https://x.test", ft_token_url="https://x.test/oauth/token",
+        api_min_interval_seconds=0,
+    )
+    client = FortyTwoClient(settings, transport=httpx.MockTransport(handler))
+    assert await client.get_allowed_registration_projects(1337) == [
+        {"id": 42, "name": "Allowed group project"}
+    ]
+    assert observed == ["/users/1337/projects_users/registration"]
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_cohort_registration_and_team_bulk_filters():
     requests: list[tuple[str, str, str]] = []
 

@@ -4,8 +4,6 @@ from app.api import routes
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.services.auth import OAUTH_STATE_COOKIE, SESSION_COOKIE, authorization_url, create_session
-from app.services.auth import AUTHORIZED_PROJECTS_CACHE
-from app.repositories.cache import CacheRepository
 
 
 def test_authorization_url_has_state_and_documented_callback():
@@ -26,12 +24,7 @@ async def test_auth_status_and_revocable_session(client):
     async with SessionLocal() as session:
         token = await create_session(session, settings, {
             "id": 42, "login": "cadet", "usual_full_name": "Cadet 42",
-            "_authorized_projects": [{"id": 101, "name": "webserv", "slug": "webserv", "extra": "discarded"}],
         })
-        catalog = await CacheRepository(session, settings.session_ttl_hours * 3600).get(
-            AUTHORIZED_PROJECTS_CACHE, "42"
-        )
-        assert catalog and catalog[0] == [{"id": 101, "name": "webserv", "slug": "webserv", "project_sessions": None}]
     client.cookies.set(SESSION_COOKIE, token)
     authenticated = await client.get("/api/auth/me")
     assert authenticated.json()["authenticated"] is True
@@ -55,7 +48,8 @@ async def test_required_mode_blocks_data_but_accepts_42_callback(client, monkeyp
     settings.auth_required = True
 
     async def profile(*_args, **_kwargs):
-        return {"id": 84, "login": "student", "usual_full_name": "Student 42", "cursus_users": [{"id": 1}]}
+        return {"id": 84, "login": "student", "usual_full_name": "Student 42",
+                "cursus_users": [{"id": 1}]}
 
     monkeypatch.setattr(routes, "exchange_code", profile)
     try:
