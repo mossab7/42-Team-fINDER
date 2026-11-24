@@ -43,7 +43,7 @@ export const api = {
 }
 
 export type StudentProfile={user_id:number;login:string;display_name:string;image_url?:string|null;profile_url?:string|null;campus_name?:string|null;campus_id?:number|null;level?:number|null;biography:string;skills:string[];languages:string[];availability:string;working_hours:string;github_url?:string|null;visible:boolean}
-export type MatchProject={id:number;name:string;maximum_team_size:number;campus_id?:number|null}
+export type MatchProject={id:number;name:string;slug?:string|null;maximum_team_size:number;campus_id?:number|null;subscription_status:'subscribed'|'eligible';registration_status?:string|null}
 export type MatchItem={id:number;project_id:number;project_name:string;created_at:string;profile:StudentProfile}
 export type NotificationItem={id:number;type:string;title:string;body:string;payload:Record<string,unknown>;read:boolean;created_at:string}
 export type PlatformTeam={id:number;project_id:number;project_name:string;name:string;description:string;maximum_members:number;available_spots:number;status:string;creator_id:number;members:{role:string;profile:StudentProfile}[]}

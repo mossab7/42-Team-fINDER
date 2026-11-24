@@ -11,9 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.models.database import AuthSession, StudentProfile, utcnow
+from app.repositories.cache import CacheRepository
 
 SESSION_COOKIE = "team_finder_session"
 OAUTH_STATE_COOKIE = "team_finder_oauth_state"
+AUTHORIZED_PROJECTS_CACHE = "authorized_project_catalog"
 
 
 def new_state() -> str:
@@ -62,17 +64,57 @@ async def exchange_code(settings: Settings, code: str) -> dict[str, Any]:
         )
         profile.raise_for_status()
         payload = profile.json()
+        # Unlike the public projects_users index, /me/projects is evaluated in
+        # the context of the signed-in student and includes projects currently
+        # offered to them by Intra. Capture that short catalogue while the
+        # authorization-code token is available; the token itself is never
+        # retained.
+        authorized_projects: list[dict[str, Any]] | None = None
+        try:
+            authorized_projects = []
+            page = 1
+            while True:
+                projects_response = await client.get(
+                    f"{settings.ft_api_base_url.rstrip('/')}/me/projects",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"page[number]": page, "page[size]": 100},
+                )
+                projects_response.raise_for_status()
+                project_page = projects_response.json()
+                if not isinstance(project_page, list):
+                    authorized_projects = None
+                    break
+                authorized_projects.extend(project_page)
+                if len(project_page) < 100:
+                    break
+                page += 1
+        except (httpx.HTTPError, ValueError):
+            # Authentication should remain usable if this optional endpoint is
+            # temporarily unavailable. The picker will still show active
+            # registrations and refresh the catalogue at the next sign-in.
+            authorized_projects = None
     if not isinstance(payload, dict) or not payload.get("id") or not payload.get("login"):
         raise RuntimeError("42 OAuth returned an incomplete user profile")
     # A 42 identity must have at least one cursus enrollment. This prevents an
     # accidentally authorized non-student/service identity from seeing records.
     if not isinstance(payload.get("cursus_users"), list) or not payload["cursus_users"]:
         raise PermissionError("This 42 account has no student cursus enrollment")
+    if authorized_projects is not None:
+        payload["_authorized_projects"] = authorized_projects
     return payload
 
 
 async def create_session(session: AsyncSession, settings: Settings, profile: dict[str, Any]) -> str:
     await sync_student_profile(session, profile)
+    if isinstance(profile.get("_authorized_projects"), list):
+        compact_projects = [
+            {key: project.get(key) for key in ("id", "name", "slug", "project_sessions")}
+            for project in profile["_authorized_projects"]
+            if isinstance(project, dict) and isinstance(project.get("id"), int)
+        ]
+        await CacheRepository(session, settings.session_ttl_hours * 3600).put(
+            AUTHORIZED_PROJECTS_CACHE, str(int(profile["id"])), compact_projects
+        )
     raw_token = secrets.token_urlsafe(48)
     expires_at = utcnow() + timedelta(hours=settings.session_ttl_hours)
     session.add(AuthSession(

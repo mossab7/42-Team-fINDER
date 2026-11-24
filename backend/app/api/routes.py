@@ -24,7 +24,7 @@ from app.services.fortytwo import FortyTwoAPIError, FortyTwoClient
 from app.services.project_configuration import derive_project_configuration, select_project_session
 from app.services.scanner import create_scan
 from app.services.auth import (OAUTH_STATE_COOKIE, SESSION_COOKIE, authorization_url, create_session,
-                               current_user, exchange_code, new_state, revoke_session)
+                               AUTHORIZED_PROJECTS_CACHE, current_user, exchange_code, new_state, revoke_session)
 
 router = APIRouter(prefix="/api")
 
@@ -384,6 +384,28 @@ def matching_eligible(item: dict) -> bool:
     return bool(registration) and registration.get("locked?") is not True and not registration.get("marked_at")
 
 
+ACTIVE_MATCHMAKING_STATUSES = {"in_progress", "searching_a_group", "waiting_to_start"}
+
+
+def discover_registration_state(registration: dict) -> str | None:
+    """Classify only explicit 42 registration states for the project picker.
+
+    ``available`` is 42's evidence that the project is unlocked for the
+    student, but it is not evidence that they enrolled.  Keeping it distinct
+    from active registrations lets the UI advertise the option without ever
+    exposing peers or accepting swipes prematurely.
+    """
+    if (registration.get("locked?") is True or registration.get("marked_at")
+            or registration.get("validated?") is True or registration.get("current_team_id")):
+        return None
+    status = registration.get("status")
+    if status in ACTIVE_MATCHMAKING_STATUSES:
+        return "subscribed"
+    if status == "available":
+        return "eligible"
+    return None
+
+
 def eligible_student_ids(scan: Scan) -> set[int]:
     """The two statuses are explicit scanner evidence of a peer opportunity."""
     return {int(item["id"]) for item in (scan.result or {}).get("students", []) if matching_eligible(item)}
@@ -422,9 +444,7 @@ async def actor_has_active_group_registration(actor: StudentProfile, project_id:
     try:
         rows = await client.get_all("/projects_users", params={"filter[user_id]": actor.user_id,
                                                                   "filter[project_id]": project_id})
-        registration = next((item for item in rows if item.get("status") in {"in_progress", "searching_a_group", "waiting_to_start"}
-                             and not item.get("marked_at") and item.get("validated?") is not True
-                             and not item.get("current_team_id")), None)
+        registration = next((item for item in rows if discover_registration_state(item) == "subscribed"), None)
         if not registration:
             return False
         project = (await client.request("GET", f"/projects/{project_id}")).json()
@@ -451,23 +471,54 @@ async def discover_projects(request: Request, session: AsyncSession = Depends(ge
         client = FortyTwoClient(get_settings())
         try:
             registrations = await client.get_all("/projects_users", params={"filter[user_id]": actor.user_id})
-            items: list[dict] = []
+            # A student can have more than one projects_user occurrence. Keep
+            # one entry per project and prefer an active registration over an
+            # older ``available`` occurrence.
+            registrations_by_project: dict[int, tuple[dict, str]] = {}
+            known_registration_ids: set[int] = set()
             for registration in registrations:
-                status = registration.get("status")
                 project = registration.get("project") or {}
                 project_id = project.get("id") or registration.get("project_id")
-                if (not isinstance(project_id, int) or status not in {"in_progress", "searching_a_group", "waiting_to_start"}
-                        or registration.get("marked_at") or registration.get("validated?") is True
-                        or registration.get("current_team_id")):
+                if isinstance(project_id, int):
+                    known_registration_ids.add(project_id)
+                state = discover_registration_state(registration)
+                if not isinstance(project_id, int) or state is None:
                     continue
-                detail = (await client.request("GET", f"/projects/{project_id}")).json()
+                previous = registrations_by_project.get(project_id)
+                if previous and (previous[1] == "subscribed" or state == "eligible"):
+                    continue
+                registrations_by_project[project_id] = (registration, state)
+
+            # /me/projects is captured during OAuth sign-in because this
+            # user-context endpoint is unavailable to client credentials. Any
+            # project absent from projects_users is offered by Intra but not
+            # yet subscribed. Never infer eligibility from global project data.
+            catalog_cache = CacheRepository(session, get_settings().session_ttl_hours * 3600)
+            cached_catalog = await catalog_cache.get(AUTHORIZED_PROJECTS_CACHE, str(actor.user_id), allow_stale=True)
+            for project in cached_catalog[0] if cached_catalog else []:
+                project_id = project.get("id")
+                if not isinstance(project_id, int) or project_id in known_registration_ids:
+                    continue
+                registrations_by_project[project_id] = (
+                    {"project": project, "project_id": project_id, "status": "available"}, "eligible"
+                )
+
+            items: list[dict] = []
+            for project_id, (registration, state) in registrations_by_project.items():
+                project = registration.get("project") or {}
+                detail = project if project.get("project_sessions") else (
+                    await client.request("GET", f"/projects/{project_id}")
+                ).json()
                 constraints = derive_project_configuration(select_project_session(detail, actor.campus_id))
                 if constraints["solo"]:
                     continue
                 items.append({"id": project_id, "name": project.get("name") or detail.get("name") or f"Project {project_id}",
+                              "slug": project.get("slug") or detail.get("slug"),
                               "maximum_team_size": constraints["max_team_size"], "campus_id": actor.campus_id,
+                              "subscription_status": state, "registration_status": registration.get("status"),
                               "scanned_at": None})
-            return {"items": items, "source": "your active 42 project registrations"}
+            items.sort(key=lambda item: (item["subscription_status"] != "subscribed", item["name"].lower()))
+            return {"items": items, "source": "your active and available 42 projects"}
         except FortyTwoAPIError as exc:
             # The scan fallback remains useful during temporary 42 rate limits.
             fallback_warning = str(exc)
@@ -489,7 +540,9 @@ async def discover_projects(request: Request, session: AsyncSession = Depends(ge
             continue
         seen.add(project_id)
         items.append({"id": project_id, "name": details[0], "maximum_team_size": details[1],
-                      "campus_id": details[2], "scanned_at": scan.data_retrieved_at or scan.completed_at})
+                      "campus_id": details[2], "subscription_status": "subscribed",
+                      "registration_status": "verified_by_scan",
+                      "scanned_at": scan.data_retrieved_at or scan.completed_at})
     return {"items": items, "source": "completed eligibility scans", "warning": fallback_warning}
 
 
