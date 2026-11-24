@@ -6,6 +6,7 @@ from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.models.database import Scan, StudentProfile, utcnow
 from app.services.auth import create_session
+from app.api.routes import discover_registration_state
 
 
 def eligible_student(user_id: int, login: str) -> dict:
@@ -13,6 +14,14 @@ def eligible_student(user_id: int, login: str) -> dict:
             "campus": "Paris", "promotion": "2024", "level": 5.0, "project_status": "in_progress",
             "team_status": "registered_without_team", "profile_url": "https://profile.intra.42.fr",
             "classification_reason": "verified", "available_data": {"project_user": {"status": "searching_a_group", "locked?": False}}}
+
+
+def test_discover_registration_state_keeps_eligibility_separate_from_enrollment():
+    assert discover_registration_state({"status": "searching_a_group"}) == "subscribed"
+    assert discover_registration_state({"status": "in_progress"}) == "subscribed"
+    assert discover_registration_state({"status": "available", "locked?": False}) == "eligible"
+    assert discover_registration_state({"status": "available", "locked?": True}) is None
+    assert discover_registration_state({"status": "finished", "validated?": True}) is None
 
 
 @pytest.mark.asyncio
@@ -32,6 +41,7 @@ async def test_project_scoped_mutual_swipes_create_one_match(client):
     client.cookies.set("team_finder_session", first)
     projects = await client.get("/api/discover/projects")
     assert projects.status_code == 200 and projects.json()["items"][0]["id"] == 101
+    assert projects.json()["items"][0]["subscription_status"] == "subscribed"
     candidates = await client.get("/api/discover/candidates?project_id=101")
     assert candidates.status_code == 200 and candidates.json()["items"][0]["login"] == "lin"
     assert (await client.post("/api/swipes", json={"target_user_id": 2, "project_id": 101, "direction": "right"})).json()["matched"] is False

@@ -1,14 +1,52 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Heart, Layers3, LoaderCircle, MousePointerClick, Sparkles, X } from 'lucide-react'
-import { api, type StudentProfile } from '../services/api'
+import { BadgeCheck, ChevronDown, ExternalLink, FolderKanban, Heart, Layers3, LoaderCircle, MousePointerClick, Sparkles, Unlock, X } from 'lucide-react'
+import { api, type MatchProject, type StudentProfile } from '../services/api'
 import { Avatar } from '../components/Avatar'
-
-const field = 'h-12 w-full rounded-xl border border-line bg-[#0b121c] px-4 text-sm text-slate-200 outline-none transition focus:border-brand-cyan/60 focus:ring-4 focus:ring-brand-cyan/10'
 
 function Empty({ title, detail }: { title: string; detail: string }) {
   return <div className="glass-panel brand-border mx-auto max-w-3xl rounded-3xl p-10 text-center sm:p-14"><div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-brand-cyan/10 text-brand-cyan"><Layers3 size={24} /></div><h2 className="mt-5 text-xl font-bold text-white">{title}</h2><p className="mx-auto max-w-lg text-sm leading-6 text-slate-400">{detail}</p></div>
+}
+
+function ProjectPicker({ items, value, onChange }: { items: MatchProject[]; value?: number; onChange: (projectId: number) => void }) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const selected = items.find(item => item.id === value)
+  const groups = [
+    { state: 'subscribed' as const, title: 'Subscribed projects', icon: BadgeCheck },
+    { state: 'eligible' as const, title: 'Eligible on Intra', icon: Unlock },
+  ]
+
+  useEffect(() => {
+    const close = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [])
+
+  return <div ref={root} className="relative z-30 w-full lg:max-w-sm">
+    <span className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-500">Choose project</span>
+    <button type="button" aria-label="Project" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(current => !current)} className="brand-border glass-panel group relative flex min-h-16 w-full items-center gap-3 overflow-hidden rounded-2xl px-4 text-left outline-none transition hover:-translate-y-0.5 hover:shadow-[0_14px_40px_rgba(0,215,215,.12)] focus:ring-4 focus:ring-brand-cyan/10">
+      <span className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-brand-cyan to-brand-pink" />
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-brand-cyan/20 bg-brand-cyan/10 text-brand-cyan"><FolderKanban size={19} /></span>
+      <span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold text-white">{selected?.name || 'Select a team project'}</span><span className={`mt-1 block text-[11px] font-semibold uppercase tracking-[.12em] ${selected?.subscription_status === 'eligible' ? 'text-brand-pink' : 'text-brand-cyan'}`}>{selected?.subscription_status === 'eligible' ? 'Eligible · subscribe on Intra' : selected ? 'Subscribed · ready to match' : 'Your 42 project path'}</span></span>
+      <ChevronDown size={16} className={`shrink-0 text-slate-500 transition ${open ? 'rotate-180 text-brand-cyan' : ''}`} />
+    </button>
+    {open && <div role="listbox" aria-label="Team projects" className="glass-panel brand-border absolute right-0 z-50 mt-2 max-h-[26rem] w-full overflow-y-auto rounded-2xl p-2 shadow-2xl shadow-black/60">
+      {groups.map(group => {
+        const options = items.filter(item => item.subscription_status === group.state)
+        if (!options.length) return null
+        const Icon = group.icon
+        return <div key={group.state} className="py-1"><div className={`flex items-center gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-[.16em] ${group.state === 'eligible' ? 'text-brand-pink' : 'text-brand-cyan'}`}><Icon size={12} />{group.title}</div>{options.map(item => <button key={item.id} type="button" role="option" aria-selected={item.id === value} onClick={() => { onChange(item.id); setOpen(false) }} className="group/option flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-white/[.06] aria-selected:bg-brand-cyan/[.08]">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${group.state === 'eligible' ? 'bg-brand-pink shadow-[0_0_10px_rgba(255,59,124,.8)]' : 'bg-brand-cyan shadow-[0_0_10px_rgba(0,215,215,.8)]'}`} />
+          <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-200 group-hover/option:text-white">{item.name}</span><span className="mt-0.5 block text-[11px] text-slate-500">{group.state === 'eligible' ? 'Available to subscribe' : 'Matching enabled'}</span></span>
+          {item.id === value && <BadgeCheck size={16} className="shrink-0 text-brand-cyan" />}
+        </button>)}</div>
+      })}
+    </div>}
+  </div>
 }
 
 function CandidateCard({ person, onSwipe }: { person: StudentProfile; onSwipe: (direction: 'left' | 'right') => void }) {
@@ -76,8 +114,15 @@ export function Discover() {
   const [project, setProject] = useState<number>()
   const [dismissed, setDismissed] = useState<number[]>([])
   const [matchedPerson, setMatchedPerson] = useState<StudentProfile>()
-  const candidates = useQuery({ queryKey: ['candidates', project], queryFn: () => api.candidates(project!), enabled: !!project })
-  useEffect(() => { if (!project && projects.data?.items[0]) setProject(projects.data.items[0].id) }, [projects.data, project])
+  const selectedProject = projects.data?.items.find(item => item.id === project)
+  const canMatch = selectedProject?.subscription_status === 'subscribed'
+  const candidates = useQuery({ queryKey: ['candidates', project], queryFn: () => api.candidates(project!), enabled: !!project && canMatch })
+  useEffect(() => {
+    if (!project) {
+      const subscribed = projects.data?.items.find(item => item.subscription_status === 'subscribed')
+      if (subscribed) setProject(subscribed.id)
+    }
+  }, [projects.data, project])
   useEffect(() => { setDismissed([]); setMatchedPerson(undefined) }, [project])
   const swipe = useMutation({ mutationFn: ({ id, direction }: { id: number; direction: 'left' | 'right' }) => api.swipe(id, project!, direction) })
   const person = candidates.data?.items.find(candidate => !dismissed.includes(candidate.user_id))
@@ -97,8 +142,8 @@ export function Discover() {
   return <section className="relative mx-auto max-w-7xl px-5 py-8 sm:px-8 lg:py-12">
     {matchedPerson && <MatchCelebration person={matchedPerson} onClose={() => setMatchedPerson(undefined)} />}
     <div className="brand-orb left-1/2 top-32 h-80 w-80 -translate-x-1/2 bg-brand-pink opacity-[.12]" />
-    <div className="relative mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between"><div><p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[.2em] text-brand-cyan"><Sparkles size={14} />Verified project peers</p><h1 className="m-0 font-display text-4xl font-black tracking-[-.04em] text-white sm:text-5xl">Find your next <span className="text-brand-pink">teammate</span></h1><p className="mb-0 mt-3 text-sm text-slate-500">Interested or pass—mutual interest becomes a match.</p></div><label className="w-full lg:max-w-sm"><span className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-500">Choose project</span><select aria-label="Project" className={field} value={project || ''} onChange={event => setProject(Number(event.target.value))}><option value="">Choose a project</option>{projects.data?.items.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div>
-    {projects.isLoading || candidates.isLoading ? <div className="grid min-h-96 place-items-center text-brand-cyan"><LoaderCircle size={30} className="animate-spin" /></div> : projects.isError || candidates.isError ? <Empty title="No eligible project scan" detail={(projects.error || candidates.error)?.message || 'Try again after the next 42 data refresh.'} /> : !projects.data?.items.length ? <Empty title="No projects to match right now" detail="Only subscribed, unlocked group projects from verified 42 data appear here." /> : !person ? <Empty title="You’re all caught up" detail="There are no additional verified peers for this project." /> : <><CandidateCard key={person.user_id} person={person} onSwipe={act} /><div className="mx-auto mt-7 flex max-w-md items-center justify-center gap-7"><button aria-label="Pass" className="grid h-16 w-16 place-items-center rounded-full border border-slate-600 bg-[#111925] text-slate-300 shadow-xl transition hover:-translate-y-1 hover:border-slate-400 hover:text-white active:scale-95" onClick={() => act('left')}><X size={27} /></button><button aria-label="Interested" className="grid h-16 w-16 place-items-center rounded-full border border-pink-200/50 bg-brand-pink text-white shadow-[0_12px_40px_rgba(255,59,124,.38)] transition hover:-translate-y-1 hover:bg-[#ff578d] active:scale-95" onClick={() => act('right')}><Heart size={27} fill="currentColor" /></button></div><p className="mt-4 text-center text-xs text-slate-600">Pass <span className="mx-2 text-slate-700">·</span> Interested</p></>}
+    <div className="relative z-20 mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between"><div><p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[.2em] text-brand-cyan"><Sparkles size={14} />Verified project peers</p><h1 className="m-0 font-display text-4xl font-black tracking-[-.04em] text-white sm:text-5xl">Find your next <span className="text-brand-pink">teammate</span></h1><p className="mb-0 mt-3 text-sm text-slate-500">Interested or pass—mutual interest becomes a match.</p></div><ProjectPicker items={projects.data?.items ?? []} value={project} onChange={setProject} /></div>
+    {projects.isLoading || (canMatch && candidates.isLoading) ? <div className="grid min-h-96 place-items-center text-brand-cyan"><LoaderCircle size={30} className="animate-spin" /></div> : projects.isError || (canMatch && candidates.isError) ? <Empty title="No eligible project scan" detail={(projects.error || candidates.error)?.message || 'Try again after the next 42 data refresh.'} /> : !projects.data?.items.length ? <Empty title="No team projects available right now" detail="Unlocked team projects will appear here when 42 marks you as subscribed or eligible to subscribe." /> : !selectedProject ? <Empty title="Choose a project" detail="Select a subscribed project to discover peers, or an eligible project to open its enrollment page on 42 Intra." /> : !canMatch ? <div className="brand-border glass-panel mx-auto max-w-2xl overflow-hidden rounded-3xl p-8 text-center sm:p-11"><div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-brand-pink/20 bg-brand-pink/10 text-brand-pink shadow-pink-glow"><Unlock size={27} /></div><p className="mb-2 mt-6 text-xs font-bold uppercase tracking-[.2em] text-brand-pink">Eligible · not subscribed</p><h2 className="m-0 text-2xl font-black text-white">Subscribe to {selectedProject.name} first</h2><p className="mx-auto mt-4 max-w-lg text-sm leading-6 text-slate-400">42 Intra shows that you are eligible for this team project, but matching is available only after you subscribe. Enroll on your school Intra, then return and refresh the page.</p><a href={selectedProject.slug ? `https://projects.intra.42.fr/projects/${encodeURIComponent(selectedProject.slug)}` : 'https://projects.intra.42.fr/'} target="_blank" rel="noreferrer" className="mt-6 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-brand-cyan px-5 text-sm font-bold text-[#041316] shadow-[0_0_30px_rgba(0,215,215,.22)] transition hover:-translate-y-0.5 hover:bg-[#35ebeb]">Subscribe on 42 Intra<ExternalLink size={16} /></a></div> : !person ? <Empty title="You’re all caught up" detail="There are no additional verified peers for this project." /> : <><CandidateCard key={person.user_id} person={person} onSwipe={act} /><div className="mx-auto mt-7 flex max-w-md items-center justify-center gap-7"><button aria-label="Pass" className="grid h-16 w-16 place-items-center rounded-full border border-slate-600 bg-[#111925] text-slate-300 shadow-xl transition hover:-translate-y-1 hover:border-slate-400 hover:text-white active:scale-95" onClick={() => act('left')}><X size={27} /></button><button aria-label="Interested" className="grid h-16 w-16 place-items-center rounded-full border border-pink-200/50 bg-brand-pink text-white shadow-[0_12px_40px_rgba(255,59,124,.38)] transition hover:-translate-y-1 hover:bg-[#ff578d] active:scale-95" onClick={() => act('right')}><Heart size={27} fill="currentColor" /></button></div><p className="mt-4 text-center text-xs text-slate-600">Pass <span className="mx-2 text-slate-700">·</span> Interested</p></>}
   </section>
 }
 
