@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from app.schemas.scan import PromotionDefinition, ScanCreate, StudentResult, TeamMember, TeamResult
@@ -63,32 +63,25 @@ def matches_promotion(user: dict[str, Any], promotion: PromotionDefinition) -> b
 
 
 def reached_black_hole(user: dict[str, Any], *, now: datetime | None = None) -> bool:
-    """Return whether the student's current 42 cursus reached its black hole.
+    """Return whether the student's main 42 cursus is no longer active.
 
-    The documented ``blackholed`` API filter only distinguishes null from
-    non-null ``blackholed_at`` values, so it also selects future deadlines.
-    Compare the timestamp locally.  42 can leave a reached cursus active with
-    ``end_at = null``; when an end timestamp exists, require it to coincide
-    with the black-hole deadline so an unrelated cursus departure is not
-    misclassified.
+    ``blackholed_at`` is a projected deadline and can remain in the past for
+    students who are still enrolled, so it must never be used as an exclusion
+    flag.  The official cursus-users endpoint defines ``active`` enrollment
+    independently; in its response data that lifecycle is represented by
+    ``end_at``.  Keep null/future end dates and exclude only a cursus that has
+    actually ended.
+
+    The function name is retained for persisted-result compatibility, while
+    its behavior deliberately follows enrollment evidence instead of guessing
+    the reason the cursus ended.
     """
     cursus = main_cursus(user)
     if not cursus:
         return False
-    blackholed_at = parse_datetime(cursus.get("blackholed_at"))
     ended_at = parse_datetime(cursus.get("end_at"))
-    if not blackholed_at:
-        return False
     current = now or datetime.now(timezone.utc)
-    if blackholed_at > current:
-        return False
-    if str(cursus.get("grade") or "").lower() == "transcender":
-        return False
-    if ended_at is None:
-        return True
-    if ended_at > current:
-        return False
-    return abs(ended_at - blackholed_at) <= timedelta(hours=36)
+    return ended_at is not None and ended_at <= current
 
 
 def project_completed(project_user: dict[str, Any] | None) -> bool:

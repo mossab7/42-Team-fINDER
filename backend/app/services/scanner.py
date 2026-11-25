@@ -114,13 +114,13 @@ async def run_scan(scan_id: str) -> None:
                 and matches_promotion(user, config.promotion)
                 and not reached_black_hole(user)
             ]
-            blackholed_count = sum(
+            ended_cursus_count = sum(
                 matches_promotion(user, config.promotion) and reached_black_hole(user)
                 for user in users
             )
-            if blackholed_count:
+            if ended_cursus_count:
                 warnings.append(
-                    f"{blackholed_count} promotion students with a confirmed black-hole lifecycle transition were excluded from peer results."
+                    f"{ended_cursus_count} promotion students whose main 42 cursus has ended were excluded from peer results."
                 )
             cohort_key = ":".join(map(str, (
                 "cohort-v3", config.project_id, config.campus_id, promotion.type, promotion.year,
