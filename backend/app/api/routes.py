@@ -377,11 +377,22 @@ def profile_payload(profile: StudentProfile, *, include_contact: bool = False) -
 
 
 def matching_eligible(item: dict) -> bool:
-    """Only subscribed, unlocked group-project registrations enter matching."""
+    """Only explicit active registrations without an active team enter matching.
+
+    A retry occurrence can keep ``marked_at`` and a zero mark from its failed
+    attempt while the API already reports ``searching_a_group`` again.  The
+    current status is therefore authoritative; treating the historical mark
+    as a completion flag makes Explore and Discover disagree.
+    """
     if item.get("team_status") not in {"searching_group", "registered_without_team"}:
         return False
     registration = (item.get("available_data") or {}).get("project_user") or {}
-    return bool(registration) and registration.get("locked?") is not True and not registration.get("marked_at")
+    return (
+        bool(registration)
+        and registration.get("locked?") is not True
+        and registration.get("validated?") is not True
+        and registration.get("status") in ACTIVE_MATCHMAKING_STATUSES
+    )
 
 
 ACTIVE_MATCHMAKING_STATUSES = {"in_progress", "searching_a_group", "waiting_to_start"}
@@ -389,7 +400,7 @@ ACTIVE_MATCHMAKING_STATUSES = {"in_progress", "searching_a_group", "waiting_to_s
 
 def discover_registration_state(registration: dict) -> str | None:
     """Classify only explicit active enrollment states for the project picker."""
-    if (registration.get("locked?") is True or registration.get("marked_at")
+    if (registration.get("locked?") is True
             or registration.get("validated?") is True or registration.get("current_team_id")):
         return None
     status = registration.get("status")
@@ -415,19 +426,69 @@ def project_details(scan: Scan, project_id: int) -> tuple[str, int, int | None] 
 
 
 async def latest_project_scan(session: AsyncSession, project_id: int, campus_id: int | None = None) -> Scan:
-    scans = (await session.scalars(select(Scan).where(Scan.status == "completed").order_by(desc(Scan.completed_at)).limit(100))).all()
+    scans = await latest_project_scans(session, project_id, campus_id)
+    if scans:
+        return scans[0]
+    raise HTTPException(409, "No completed eligibility scan is available for this project. Run a scan in Explore first.")
+
+
+def scan_promotion_key(scan: Scan) -> tuple:
+    promotion = (scan.configuration or {}).get("promotion") or {}
+    return (
+        promotion.get("type"), promotion.get("year"), promotion.get("month"),
+        promotion.get("start_date"), promotion.get("end_date"),
+    )
+
+
+async def latest_project_scans(
+    session: AsyncSession, project_id: int, campus_id: int | None = None,
+) -> list[Scan]:
+    """Return the newest snapshot for every scanned promotion of a project.
+
+    Explore deliberately scans one promotion at a time. Discover is
+    project-based, so selecting only the most recent scan silently drops peers
+    found in other promotions. Newer scans replace older evidence only within
+    the same promotion definition.
+    """
+    scans = (await session.scalars(
+        select(Scan).where(
+            Scan.status == "completed",
+            Scan.configuration["project_id"].as_integer() == project_id,
+        ).order_by(desc(Scan.created_at))
+    )).all()
+    selected: list[Scan] = []
+    seen_promotions: set[tuple] = set()
     for scan in scans:
         details = project_details(scan, project_id)
-        if details and (campus_id is None or details[2] in {None, campus_id}):
-            return scan
-    raise HTTPException(409, "No completed eligibility scan is available for this project. Run a scan in Explore first.")
+        if not details or (campus_id is not None and details[2] not in {None, campus_id}):
+            continue
+        promotion = scan_promotion_key(scan)
+        if promotion in seen_promotions:
+            continue
+        seen_promotions.add(promotion)
+        selected.append(scan)
+    return selected
+
+
+def project_candidate_evidence(scans: list[Scan]) -> dict[int, dict]:
+    """Deduplicate peer evidence while preferring the newest cohort snapshot."""
+    evidence: dict[int, dict] = {}
+    for scan in scans:
+        for item in (scan.result or {}).get("students", []):
+            try:
+                user_id = int(item["id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            evidence.setdefault(user_id, item)
+    return {user_id: item for user_id, item in evidence.items() if matching_eligible(item)}
 
 
 async def actor_has_active_group_registration(actor: StudentProfile, project_id: int, session: AsyncSession) -> bool:
     """Verify the caller's own registration before exposing/swiping peers."""
     if get_settings().use_demo_data:
         try:
-            return actor.user_id in eligible_student_ids(await latest_project_scan(session, project_id, actor.campus_id))
+            scans = await latest_project_scans(session, project_id, actor.campus_id)
+            return actor.user_id in project_candidate_evidence(scans)
         except HTTPException:
             return False
     if not actor.campus_id:
@@ -538,17 +599,21 @@ async def discover_candidates(project_id: int, level_min: float | None = None, l
                               skill: str = "", availability: str = "", request: Request = None,
                               session: AsyncSession = Depends(get_session)):
     actor = await matchmaking_actor(request, session)
-    scan = await latest_project_scan(session, project_id, actor.campus_id)
+    scans = await latest_project_scans(session, project_id, actor.campus_id)
+    if not scans:
+        raise HTTPException(409, "No completed eligibility scan is available for this project. Run a scan in Explore first.")
+    scan = scans[0]
     if not await actor_has_active_group_registration(actor, project_id, session):
         raise HTTPException(403, "Your active 42 registration for this group project could not be verified.")
-    target_ids = eligible_student_ids(scan) - {actor.user_id}
+    evidence = project_candidate_evidence(scans)
+    target_ids = set(evidence) - {actor.user_id}
     if not target_ids:
         return {"items": [], "scan_id": scan.id, "data_retrieved_at": scan.data_retrieved_at}
     swiped = set((await session.scalars(select(Swipe.target_user_id).where(Swipe.swiper_user_id == actor.user_id,
                          Swipe.project_id == project_id))).all())
     items = []
-    for result in (scan.result or {}).get("students", []):
-        if int(result.get("id", -1)) not in target_ids or int(result.get("id", -1)) in swiped:
+    for user_id, result in evidence.items():
+        if user_id not in target_ids or user_id in swiped:
             continue
         level = result.get("level")
         if level_min is not None and (level is None or level < level_min): continue
@@ -563,7 +628,8 @@ async def discover_candidates(project_id: int, level_min: float | None = None, l
                       "languages": [], "availability": "", "working_hours": "", "github_url": None,
                       "visible": True})
     items.sort(key=lambda item: (item["level"] is None, item["login"].lower()))
-    return {"items": items, "scan_id": scan.id, "data_retrieved_at": scan.data_retrieved_at}
+    return {"items": items, "scan_id": scan.id, "scan_ids": [item.id for item in scans],
+            "data_retrieved_at": scan.data_retrieved_at}
 
 
 @router.post("/swipes")
@@ -576,11 +642,14 @@ async def create_swipe(payload: dict, request: Request, session: AsyncSession = 
     direction = payload.get("direction")
     if direction not in {"left", "right"} or target_id == actor.user_id:
         raise HTTPException(422, "Use left or right for another student")
-    scan = await latest_project_scan(session, project_id, actor.campus_id)
-    eligible = eligible_student_ids(scan)
+    scans = await latest_project_scans(session, project_id, actor.campus_id)
+    if not scans:
+        raise HTTPException(409, "No completed eligibility scan is available for this project. Run a scan in Explore first.")
+    scan = scans[0]
+    eligible = set(project_candidate_evidence(scans))
     target = await session.get(StudentProfile, target_id)
     if target_id not in eligible or not await actor_has_active_group_registration(actor, project_id, session):
-        raise HTTPException(403, "Both students must be verified as eligible in the same completed scan")
+        raise HTTPException(403, "Both students must be verified as eligible in completed project scans")
     swipe = await session.scalar(select(Swipe).where(Swipe.swiper_user_id == actor.user_id,
         Swipe.target_user_id == target_id, Swipe.project_id == project_id))
     if swipe: swipe.direction = direction

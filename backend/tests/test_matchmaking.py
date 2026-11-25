@@ -10,19 +10,91 @@ from app.services.auth import create_session
 from app.api.routes import discover_registration_state
 
 
-def eligible_student(user_id: int, login: str) -> dict:
+def eligible_student(user_id: int, login: str, *, project_user: dict | None = None) -> dict:
     return {"id": user_id, "login": login, "display_name": login.title(), "image_url": None,
             "campus": "Paris", "promotion": "2024", "level": 5.0, "project_status": "in_progress",
             "team_status": "registered_without_team", "profile_url": "https://profile.intra.42.fr",
-            "classification_reason": "verified", "available_data": {"project_user": {"status": "searching_a_group", "locked?": False}}}
+            "classification_reason": "verified", "available_data": {"project_user": project_user or {"status": "searching_a_group", "locked?": False}}}
 
 
 def test_discover_registration_state_keeps_eligibility_separate_from_enrollment():
     assert discover_registration_state({"status": "searching_a_group"}) == "subscribed"
+    assert discover_registration_state({
+        "status": "searching_a_group", "marked_at": "2026-11-18T16:16:44.960Z",
+        "validated?": False,
+    }) == "subscribed"
     assert discover_registration_state({"status": "in_progress"}) == "subscribed"
     assert discover_registration_state({"status": "available", "locked?": False}) is None
     assert discover_registration_state({"status": "available", "locked?": True}) is None
     assert discover_registration_state({"status": "finished", "validated?": True}) is None
+
+
+def test_retry_searching_for_group_remains_matchmaking_eligible_after_failed_mark():
+    retry = eligible_student(2, "retry", project_user={
+        "status": "searching_a_group",
+        "occurrence": 1,
+        "marked_at": "2026-11-18T16:16:44.960Z",
+        "validated?": False,
+        "final_mark": 0,
+        "current_team_id": None,
+    })
+
+    assert routes.matching_eligible(retry)
+
+
+def test_waiting_for_correction_is_not_a_matchmaking_candidate():
+    correction = eligible_student(2, "correction", project_user={
+        "status": "waiting_for_correction",
+        "marked_at": "2026-11-18T16:16:44.960Z",
+        "validated?": False,
+        "final_mark": 0,
+        "current_team_id": 123,
+    })
+
+    assert not routes.matching_eligible(correction)
+
+
+@pytest.mark.asyncio
+async def test_discover_combines_latest_scanned_promotions_for_same_project(client):
+    now = utcnow()
+    async with SessionLocal() as session:
+        token = await create_session(session, get_settings(), {
+            "id": 1, "login": "actor", "usual_full_name": "Actor", "cursus_users": [],
+        })
+        actor = await session.get(StudentProfile, 1)
+        actor.campus_id = 9
+        actor.campus_name = "Paris"
+        shared_configuration = {
+            "project_id": 101,
+            "project_name": "outer-circle-team-project",
+            "campus_id": 9,
+            "max_team_size": 3,
+        }
+        session.add_all([
+            Scan(
+                id="promotion-2025", status="completed", progress_stage="Done",
+                completed_work=1, total_work=1, source="demo", created_at=now,
+                started_at=now, completed_at=now, data_retrieved_at=now,
+                configuration={**shared_configuration, "promotion": {"type": "cursus_year", "year": 2025}},
+                result={"students": [eligible_student(1, "actor"), eligible_student(2, "newer")],
+                        "teams": [], "summary": {}},
+            ),
+            Scan(
+                id="promotion-2024", status="completed", progress_stage="Done",
+                completed_work=1, total_work=1, source="demo", created_at=now - timedelta(minutes=5),
+                started_at=now - timedelta(minutes=5), completed_at=now - timedelta(minutes=5),
+                data_retrieved_at=now - timedelta(minutes=5),
+                configuration={**shared_configuration, "promotion": {"type": "cursus_year", "year": 2024}},
+                result={"students": [eligible_student(3, "older")], "teams": [], "summary": {}},
+            ),
+        ])
+        await session.commit()
+
+    client.cookies.set("team_finder_session", token)
+    response = await client.get("/api/discover/candidates?project_id=101")
+
+    assert response.status_code == 200
+    assert {item["login"] for item in response.json()["items"]} == {"newer", "older"}
 
 
 @pytest.mark.asyncio

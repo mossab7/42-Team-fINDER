@@ -124,6 +124,7 @@ def classify(
     project_by_user = {
         item.get("user", {}).get("id") or item.get("user_id"): item for item in project_users
     }
+    teams_by_id = {team.get("id"): team for team in teams if team.get("id") is not None}
     active_team_by_user: dict[int, dict[str, Any]] = {}
     for team in teams:
         if team_unavailable(team):
@@ -131,6 +132,14 @@ def classify(
         for member in team.get("users") or []:
             if member.get("id") is not None:
                 active_team_by_user[member["id"]] = team
+    # A closed team awaiting correction is unavailable for the team directory,
+    # but its current members are not peer-search candidates. Conversely, a
+    # retry registration can retain an old closed team in ``teams`` while its
+    # ``current_team_id`` is null; keep that student eligible to search again.
+    for user_id, project_user in project_by_user.items():
+        current_team = teams_by_id.get(project_user.get("current_team_id"))
+        if user_id is not None and current_team is not None:
+            active_team_by_user[user_id] = current_team
 
     student_results: list[StudentResult] = []
     for user in eligible:

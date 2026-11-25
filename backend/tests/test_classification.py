@@ -58,6 +58,49 @@ def test_completed_and_unavailable_hidden_by_default():
     assert 303 in {item.id for item in team_results}
 
 
+def test_current_closed_team_awaiting_correction_is_not_a_peer_candidate():
+    users, project_users, teams = fixture_data()
+    project_users[0].update({
+        "status": "waiting_for_correction",
+        "current_team_id": 304,
+    })
+    teams.append({
+        "id": 304,
+        "name": "awaiting-correction",
+        "project_id": 101,
+        "status": "waiting_for_correction",
+        "locked?": True,
+        "closed?": True,
+        "users": [{"id": 1, "login": "ada", "projects_user_id": 201}],
+    })
+
+    students, _, _ = classify(configuration(), users, project_users, teams)
+    assert "ada" not in {item.login for item in students}
+
+
+def test_retry_searching_group_ignores_old_closed_team_membership():
+    users, project_users, teams = fixture_data()
+    project_users[0].update({
+        "status": "searching_a_group",
+        "occurrence": 1,
+        "marked_at": "2026-11-18T16:16:44.960Z",
+        "final_mark": 0,
+        "current_team_id": None,
+    })
+    teams.append({
+        "id": 304,
+        "name": "failed-attempt",
+        "project_id": 101,
+        "status": "finished",
+        "locked?": True,
+        "closed?": True,
+        "users": [{"id": 1, "login": "ada", "projects_user_id": 199}],
+    })
+
+    students, _, _ = classify(configuration(), users, project_users, teams)
+    assert {item.login: item.team_status for item in students}["ada"] == "searching_group"
+
+
 def test_locked_team_is_capacity_not_confirmed_joinable():
     users, project_users, teams = fixture_data()
     _, team_results, _ = classify(configuration(), users, project_users, teams)
