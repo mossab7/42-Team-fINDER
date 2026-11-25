@@ -29,6 +29,25 @@ def primary_cursus(user: dict[str, Any]) -> dict[str, Any] | None:
     return max(candidates, key=lambda item: item.get("begin_at") or "", default=None)
 
 
+def main_cursus(user: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the newest 42 cursus enrollment, ignoring Piscine records.
+
+    Campus user payloads can contain several cursus enrollments.  A newer or
+    still-active Piscine record must not hide the lifecycle of the student's
+    main 42 cursus.  Cursus 21 is the current 42 cursus; the slug/name checks
+    keep fixture and older response shapes compatible.
+    """
+    cursus_users = user.get("cursus_users") or []
+    main_records = [
+        item for item in cursus_users
+        if item.get("cursus_id") == 21
+        or (item.get("cursus") or {}).get("slug") == "42cursus"
+        or (item.get("cursus") or {}).get("name") == "42"
+    ]
+    candidates = main_records or cursus_users
+    return max(candidates, key=lambda item: item.get("begin_at") or "", default=None)
+
+
 def matches_promotion(user: dict[str, Any], promotion: PromotionDefinition) -> bool:
     if promotion.type == "piscine":
         month = (user.get("pool_month") or "").lower()
@@ -44,22 +63,30 @@ def matches_promotion(user: dict[str, Any], promotion: PromotionDefinition) -> b
 
 
 def reached_black_hole(user: dict[str, Any], *, now: datetime | None = None) -> bool:
-    """Return true only for a confirmed black-hole lifecycle transition.
+    """Return whether the student's current 42 cursus reached its black hole.
 
-    ``blackholed_at`` alone is a projected deadline and remains present for
-    some active Cadets after that time.  It is therefore not sufficient proof
-    that a student black-holed.  We only classify it as confirmed when the
-    selected cursus was ended at approximately the same time as that deadline.
+    The documented ``blackholed`` API filter only distinguishes null from
+    non-null ``blackholed_at`` values, so it also selects future deadlines.
+    Compare the timestamp locally.  42 can leave a reached cursus active with
+    ``end_at = null``; when an end timestamp exists, require it to coincide
+    with the black-hole deadline so an unrelated cursus departure is not
+    misclassified.
     """
-    cursus = primary_cursus(user)
+    cursus = main_cursus(user)
     if not cursus:
         return False
     blackholed_at = parse_datetime(cursus.get("blackholed_at"))
     ended_at = parse_datetime(cursus.get("end_at"))
-    if not blackholed_at or not ended_at:
+    if not blackholed_at:
         return False
     current = now or datetime.now(timezone.utc)
-    if blackholed_at > current or ended_at > current:
+    if blackholed_at > current:
+        return False
+    if str(cursus.get("grade") or "").lower() == "transcender":
+        return False
+    if ended_at is None:
+        return True
+    if ended_at > current:
         return False
     return abs(ended_at - blackholed_at) <= timedelta(hours=36)
 

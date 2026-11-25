@@ -86,15 +86,47 @@ def test_students_past_black_hole_are_excluded_from_peer_results():
     assert summary["excluded_blackholed_students"] == 1
 
 
-def test_past_black_hole_deadline_does_not_exclude_an_active_student():
+def test_past_black_hole_deadline_excludes_even_when_cursus_end_is_null():
     users, project_users, teams = fixture_data()
     users[0]["cursus_users"][0]["blackholed_at"] = "2000-01-01T00:00:00Z"
+    users[0]["cursus_users"][0]["end_at"] = None
+    assert reached_black_hole(users[0])
+    students, _, summary = classify(configuration(), users, project_users, teams)
+    assert "ada" not in {item.login for item in students}
+    assert summary["total_eligible_students"] == 4
+    assert summary["excluded_blackholed_students"] == 1
+
+
+def test_future_black_hole_deadline_is_not_excluded():
+    users, project_users, teams = fixture_data()
+    users[0]["cursus_users"][0]["blackholed_at"] = "2999-01-01T00:00:00Z"
     users[0]["cursus_users"][0]["end_at"] = None
     assert not reached_black_hole(users[0])
     students, _, summary = classify(configuration(), users, project_users, teams)
     assert "ada" in {item.login for item in students}
-    assert summary["total_eligible_students"] == 5
     assert summary["excluded_blackholed_students"] == 0
+
+
+def test_transcender_is_not_excluded_by_a_stale_black_hole_timestamp():
+    users, project_users, teams = fixture_data()
+    cursus = users[0]["cursus_users"][0]
+    cursus.update({"blackholed_at": "2000-01-01T00:00:00Z", "end_at": None, "grade": "Transcender"})
+    assert not reached_black_hole(users[0])
+    students, _, summary = classify(configuration(), users, project_users, teams)
+    assert "ada" in {item.login for item in students}
+    assert summary["excluded_blackholed_students"] == 0
+
+
+def test_main_cursus_black_hole_is_not_hidden_by_active_piscine_record():
+    users, _, _ = fixture_data()
+    users[0]["cursus_users"][0].update({
+        "cursus_id": 21, "blackholed_at": "2000-01-01T00:00:00Z", "end_at": None,
+    })
+    users[0]["cursus_users"].append({
+        "cursus_id": 1, "begin_at": "2999-01-01T00:00:00Z", "end_at": None,
+        "blackholed_at": None, "grade": "Pisciner",
+    })
+    assert reached_black_hole(users[0])
 
 
 def test_ended_cursus_without_matching_black_hole_time_is_not_inferred():

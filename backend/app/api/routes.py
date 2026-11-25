@@ -271,7 +271,7 @@ def completed_scan(scan: Scan | None) -> Scan:
 @router.get("/scans/{scan_id}/students", response_model=PaginatedStudents)
 async def scan_students(
     scan_id: str, search: str = "", status: str = "", sort: Literal["login", "level", "-level"] = "login",
-    page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
+    page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=1000),
     session: AsyncSession = Depends(get_session),
 ):
     scan = completed_scan(await session.get(Scan, scan_id))
